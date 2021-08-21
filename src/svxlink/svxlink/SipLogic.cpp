@@ -643,7 +643,7 @@ bool SipLogic::initialize(void)
     }
     else
     {
-      squelch_det->setHangtime(800);
+      squelch_det->setHangtime(1200);
     }
     squelch_det->squelchOpen.connect(mem_fun(*this, &SipLogic::onSquelchOpen));
     splitter->addSink(squelch_det, true);
