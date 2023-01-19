@@ -6,7 +6,7 @@
 
 \verbatim
 SvxReflector - An audio reflector for connecting SvxLink Servers
-Copyright (C) 2003-2021 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -143,14 +143,8 @@ Reflector::~Reflector(void)
   m_udp_sock = 0;
   delete m_srv;
   m_srv = 0;
-
-  for (ReflectorClientMap::iterator it = m_client_map.begin();
-       it != m_client_map.end(); ++it)
-  {
-    delete (*it).second;
-  }
-  m_client_map.clear();
-
+  m_client_con_map.clear();
+  ReflectorClient::cleanup();
   delete TGHandler::instance();
 } /* Reflector::~Reflector */
 
@@ -333,10 +327,9 @@ void Reflector::updateRssistate(Json::Value eventmessage)
 void Reflector::nodeList(std::vector<std::string>& nodes) const
 {
   nodes.clear();
-  for (ReflectorClientMap::const_iterator it = m_client_map.begin();
-       it != m_client_map.end(); ++it)
+  for (const auto& item : m_client_con_map)
   {
-    const std::string& callsign = (*it).second->callsign();
+    const std::string& callsign = item.second->callsign();
     if (!callsign.empty())
     {
       nodes.push_back(callsign);
@@ -348,14 +341,13 @@ void Reflector::nodeList(std::vector<std::string>& nodes) const
 void Reflector::broadcastMsg(const ReflectorMsg& msg,
                              const ReflectorClient::Filter& filter)
 {
-  ReflectorClientMap::const_iterator it = m_client_map.begin();
-  for (; it != m_client_map.end(); ++it)
+  for (const auto& item : m_client_con_map)
   {
-    ReflectorClient *client = (*it).second;
+    ReflectorClient *client = item.second;
     if (filter(client) &&
         (client->conState() == ReflectorClient::STATE_CONNECTED))
     {
-      (*it).second->sendMsg(msg);
+      client->sendMsg(msg);
     }
   }
 } /* Reflector::broadcastMsg */
@@ -372,10 +364,9 @@ bool Reflector::sendUdpDatagram(ReflectorClient *client, const void *buf,
 void Reflector::broadcastUdpMsg(const ReflectorUdpMsg& msg,
                                 const ReflectorClient::Filter& filter)
 {
-  for (ReflectorClientMap::iterator it = m_client_map.begin();
-       it != m_client_map.end(); ++it)
+  for (const auto& item : m_client_con_map)
   {
-    ReflectorClient *client = (*it).second;
+    ReflectorClient *client = item.second;
     if (filter(client) &&
         (client->conState() == ReflectorClient::STATE_CONNECTED))
     {
@@ -429,9 +420,7 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
 {
   cout << "Client " << con->remoteHost() << ":" << con->remotePort()
        << " connected" << endl;
-  ReflectorClient *rc = new ReflectorClient(this, con, m_cfg);
-  m_client_map[rc->clientId()] = rc;
-  m_client_con_map[con] = rc;
+  m_client_con_map[con] = new ReflectorClient(this, con, m_cfg);
 } /* Reflector::clientConnected */
 
 
@@ -455,7 +444,6 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
   cout << "disconnected: " << TcpConnection::disconnectReasonStr(reason)
        << endl;
 
-  m_client_map.erase(client->clientId());
   m_client_con_map.erase(it);
 
   if (!client->callsign().empty())
@@ -481,14 +469,13 @@ void Reflector::udpDatagramReceived(const IpAddress& addr, uint16_t port,
     return;
   }
 
-  ReflectorClientMap::iterator it = m_client_map.find(header.clientId());
-  if (it == m_client_map.end())
+  ReflectorClient *client = ReflectorClient::lookup(header.clientId());
+  if (client == nullptr)
   {
     cerr << "*** WARNING: Incoming UDP datagram from " << addr << ":" << port
          << " has invalid client id " << header.clientId() << endl;
     return;
   }
-  ReflectorClient *client = (*it).second;
   if (addr != client->remoteHost())
   {
     cerr << "*** WARNING[" << client->callsign()
@@ -736,10 +723,9 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
 
   Json::Value status;
   status["nodes"] = Json::Value(Json::objectValue);
-  ReflectorClientMap::const_iterator client_it;
-  for (client_it = m_client_map.begin(); client_it != m_client_map.end(); ++client_it)
+  for (const auto& item : m_client_con_map)
   {
-    ReflectorClient* client = client_it->second;
+    ReflectorClient* client = item.second;
     Json::Value node(client->nodeInfo());
     //node["addr"] = client->remoteHost().toString();
     node["protoVer"]["majorVer"] = client->protoVer().majorVer();
