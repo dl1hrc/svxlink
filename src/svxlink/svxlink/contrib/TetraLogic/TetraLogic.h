@@ -297,7 +297,7 @@ class TetraLogic : public Logic
     {
       SDS_SEND_OK = 4, SDS_SEND_FAILED = 5
     } SdsSentState;
-    
+
     typedef enum
     {
       TMO=0, DMO_MS=1, VD_DUAL_WATCH_DMO=2, DMO_DUAL_WATCH_DV=3, GATEWAY=5,
@@ -366,6 +366,8 @@ class TetraLogic : public Logic
     int reg_la;
     int reg_mni;
     int reg_state;
+    std::string vendor;
+    std::string model;
 
     void initPei(void);
     void onCharactersReceived(char *buf, int count);
@@ -419,6 +421,9 @@ class TetraLogic : public Logic
     void handleRssi(std::string m_message);
     void handleCreg(std::string m_message);
     void checkReg(void);
+    void handleModel(std::string m_message);
+    void handleVendor(std::string m_message);
+    void sendSystemInfo(void);
     std::string jsonToString(Json::Value eventmessage);
 };  /* class TetraLogic */
 

@@ -201,6 +201,12 @@ class Reflector : public sigc::trackable
     void updateQsostate(Json::Value eventmessage);
 
     /**
+     * @brief  Update System information
+     * @param  event message with System information
+     */
+    void updateSysteminfostate(Json::Value eventmessage);
+
+    /**
      * @brief  Update Rssi information
      * @param  event message with rssi info
      */
@@ -242,6 +248,11 @@ class Reflector : public sigc::trackable
       time_t sent_last_sds;
     };
     std::map<std::string, User> userdata;
+
+    std::map<std::string, Json::Value> rssiStateMap;
+    std::map<std::string, Json::Value> qsoStateMap;
+    std::map<std::string, Json::Value> sdsStateMap;
+    std::map<std::string, Json::Value> systemStateMap;
 
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);

@@ -1,0 +1,152 @@
+Contrib: tetra-contrib (with/without Sip)
+=========================================
+
+----
+#
+# tetra-contrib (beta)
+# Adi Bier / DL1HRC (dl1hrc [at] gmx.de)
+#
+----
+== tetra-contrib ==
+Provides a Logic to connect to Tetra radios like MTM5400/ MTM800.
+
+This branch only works if you have the following things:
+
+- Motorola MTM5x00, MTM800E, MTM800FuG
+- active data cable, e.g. PMKN4104
+- (Sepura/Cleartone my work, but no warranty)
+
+The MS is completely controlled by AT-commands over the PEI interface
+
+Installation instructions from Frédéric/F1IWQ can be found here:
+https://github.com/f1iwq2/Tetra_Link_boardIWQ/blob/main/Doc/Download%20svxlink-tetra.pdf
+
+Here is a quick-and-dirty installation/update documentation, keep in mind: No 
+configuration will be done! For the following description it is assumed that the
+user svxlink carries out the updates.
+
+If you want to have Sip support you have to do thist things, install pjSip first
+the way described here.
+
+```
+cd /home/svxlink
+wget https://github.com/pjsip/pjproject/archive/2.12.1.tar.gz
+tar -xzvf 2.12.1.tar.gz
+cd project-2.12.1
+./configure --disable-libwebrtc --disable-video
+```
+
+On amd64/x86_64 systems you should use 
+```
+./configure --disable-libwebrtc --disable-video CPPFLAGS=-fPIC CXXFLAGS=-fPIC CFLAGS=-fPIC
+```
+otherwise linking errors may occur.
+
+```
+make dep;make
+sudo make install
+```
+
+The configuration of the Tetra part has been moved to this new file,
+normally found in /etc/svxlink/svxlink.d
+
+== First time automatic installation of tetra-functionality ==
+including German(!) voice announcements.
+
+You may use my semi-automatic installation-script from here 
+```
+http://svxlink.ham-radio-op.net/svxlink/svxlink-tetra-contrib.sh
+```
+
+Start installation as root:
+```
+wget -O - http://svxlink.ham-radio-op.net/svxlink/svxlink-tetra-contrib.sh | bash
+```
+
+After this continue with the configuration of svxlink.conf and TetraLogic.conf
+
+== 1st time installation of SvxLink with TetraLogic extension ==
+
+```
+cd /home/svxlink
+git clone https://github.com/dl1hrc/svxlink.git
+cd svxlink/src
+git checkout tetra-contrib
+mkdir build
+cd build
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DWITH_SYSTEMD=ON -DLOCAL_STATE_DIR=/var -DCMAKE_BUILD_TYPE=Release -DWITH_CONTRIB_TETRA_LOGIC=ON ..
+make
+# on weak systems make should be used with the "-j4 -l2" options: make -j4 -l2
+# tnx to Daniel/SP0DZ
+sudo make install
+```
+
+Please not that the cmake-parameter "-DWITH_CONTRIB_TETRA_LOGIC=ON" enables the
+TetraLogic extension. Without this it will not work.
+
+== 1st time installation of SvxLink with TetraLogic AND Sip-functionality ==
+
+```
+cd /home/svxlink
+# install pjSip first:
+wget https://github.com/pjsip/pjproject/archive/2.12.1.tar.gz
+tar -xzvf 2.12.1.tar.gz
+cd pjproject-2.12.1
+./configure --disable-libwebrtc --disable-video
+make dep
+make
+sudo make install
+# then continue with SvxLink
+cd /home/svxlink
+git clone https://github.com/dl1hrc/svxlink.git
+cd svxlink/src
+git checkout tetra-contrib
+mkdir build
+cd build
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DWITH_SYSTEMD=ON -DCMAKE_BUILD_TYPE=Release -DWITH_CONTRIB_TETRA_LOGIC=ON -DWITH_CONTRIB_SIP_LOGIC=ON  ..
+make
+# on weak systems make should be used with the "-j4 -l2" options: make -j4 -l2
+# tnx to Daniel/SP0DZ
+sudo make install
+```
+
+== Update an existing tetra-contrib ==
+
+```
+systemctl stop svxlink
+cd /home/svxlink/svxlink/src/build/
+make clean
+git pull
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DCMAKE_BUILD_TYPE=Release -DWITH_CONTRIB_TETRA_LOGIC=ON ..
+sudo make install
+sudo systemctl start svxlink
+```
+
+== Update an existing tetra-contrib with Sip-support ==
+
+```
+systemctl stop svxlink
+cd /home/svxlink/svxlink/src/build/
+make clean
+git pull
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DCMAKE_BUILD_TYPE=Release -DWITH_CONTRIB_TETRA_LOGIC=ON -DWITH_CONTRIB_SIP_LOGIC=ON -DWITH_SYSTEMD=ON ..
+sudo make install
+sudo systemctl start svxlink
+```
+
+The new configuration file TetraLogic.conf must contain the [TetraLogic]-section
+from svxlink.conf. This file is now located in /etc/svxlink/svxlink.d directory.
+Remove the [TetraLogic]-section from svxlink.conf but let the LOGICS- and LINKS
+definitions with "Tetra" untouched.
+
+To use the QOS (quality of service) funtionality the installation and configuration
+of ssmtp is needed.
+
+The new configuration file SipLogic.conf must contain the [SipLogic]-section
+from svxlink.conf. This file is now located in /etc/svxlink/svxlink.d directory.
+Remove the [SipLogic]-section from svxlink.conf but let the LOGICS- and LINKS
+definitions with "Sip" untouched.
+
+== Documentation ==
+- manpage svxlink.conf.5
+- German pdf is available here: https://github.com/dl1hrc/documentation

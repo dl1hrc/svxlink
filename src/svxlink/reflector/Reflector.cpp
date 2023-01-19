@@ -308,20 +308,34 @@ void Reflector::updateUserdata(Json::Value user_arr)
 
 void Reflector::updateSdsdata(Json::Value eventmessage)
 {
+  std::string s = eventmessage.get("source","").asString();
+  sdsStateMap[s] = eventmessage;
   cout << jsonToString(eventmessage) << endl;
 } /* Reflector::updateSdsdata */
 
 
 void Reflector::updateQsostate(Json::Value eventmessage)
 {
+  std::string s = eventmessage.get("source","").asString();
+  qsoStateMap[s] = eventmessage;
   cout << jsonToString(eventmessage) << endl;
 } /* Reflector::updateQsostate */
 
 
 void Reflector::updateRssistate(Json::Value eventmessage)
 {
+  std::string s = eventmessage.get("source","").asString();
+  rssiStateMap[s] = eventmessage;
   cout << jsonToString(eventmessage) << endl;
 } /* Reflector::updateRssistate */
+
+
+void Reflector::updateSysteminfostate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();
+  systemStateMap[s] = eventmessage;
+  cout << jsonToString(eventmessage) << endl;
+} /* Reflector::updateSysteminfostate */
 
 
 void Reflector::nodeList(std::vector<std::string>& nodes) const
@@ -747,6 +761,11 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
     node["monitoredTGs"] = tgs;
     bool is_talker = TGHandler::instance()->talkerForTG(tg) == client;
     node["isTalker"] = is_talker;
+
+    node["Rssi::info"] = rssiStateMap[client->callsign()];
+    node["Qso::info"] = qsoStateMap[client->callsign()];
+    node["Sds::info"] = sdsStateMap[client->callsign()];
+    node["System::info"] = systemStateMap[client->callsign()];
 
     if (node.isMember("qth") && node["qth"].isArray())
     {

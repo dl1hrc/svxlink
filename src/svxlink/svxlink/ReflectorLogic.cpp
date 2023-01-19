@@ -732,7 +732,7 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
     sendMsg(msg);
   }
   else if (event_name == "Sds:info" || event_name == "DvUsers:info" ||
-           event_name == "Rssi:info")
+           event_name == "Rssi:info" ||event_name == "System:info")
   {
    // cout << "sende: " << event_name << "," << data << endl;
     MsgStateEvent msg(logic->name(), event_name, data);

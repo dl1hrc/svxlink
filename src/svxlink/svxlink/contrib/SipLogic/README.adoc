@@ -52,4 +52,3 @@ make install
 == Documentation ==
 - manpage svxlink.conf.5
 - German pdf is available here: https://github.com/dl1hrc/documentation
-
