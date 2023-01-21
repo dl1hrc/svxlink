@@ -745,6 +745,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   }
   else if (msg.name() == "System:info")
   {
+    eventmessage["source"] = m_callsign;
     m_reflector->updateSysteminfostate(eventmessage);
   }
 } /* ReflectorClient::handleStateEvent */
