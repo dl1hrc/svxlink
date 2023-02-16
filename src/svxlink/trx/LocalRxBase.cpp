@@ -10,7 +10,7 @@ the SvxLink core is running. It can also be a DDR (Digital Drop Receiver).
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2021 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -136,7 +136,7 @@ class PeakMeter : public AudioPassthrough
       if (i < ret)
       {
       	cout << name
-	     << ": Distortion detected! Please lower the input volume!\n";
+	     << ": Distorsion detected! Please lower the input volume!\n";
       }
       
       return ret;
@@ -395,7 +395,7 @@ bool LocalRxBase::initialize(void)
   }
   
     // Create a splitter to distribute full bandwidth audio to all consumers
-  fullband_splitter = new AudioSplitter;
+  AudioSplitter *fullband_splitter = new AudioSplitter;
   prev_src->registerSink(fullband_splitter, true);
   prev_src = fullband_splitter;
 
@@ -521,6 +521,17 @@ bool LocalRxBase::initialize(void)
 
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
+
+//Änderung RX VoiceBandFilter nach DL1JAE ++++++++++++++++++++++++++++++++++
+string filterdesc;
+if (cfg().getValue(name(),"RX_AUDIO_FILTER",filterdesc))
+{
+  AudioFilter *voiceband_filter = new AudioFilter(filterdesc);
+  prev_src->registerSink(voiceband_filter, true);
+  prev_src = voiceband_filter;
+}
+else
+{
 #if (INTERNAL_SAMPLE_RATE == 16000)
   AudioFilter *voiceband_filter = new AudioFilter("BpCh12/-0.1/300-5000");
 #else
@@ -528,6 +539,8 @@ bool LocalRxBase::initialize(void)
 #endif
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
+}
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
@@ -608,14 +621,15 @@ bool LocalRxBase::initialize(void)
   {
     AudioCompressor *limit = new AudioCompressor;
     limit->setThreshold(limiter_thresh);
-    limit->setRatio(0.1);
-    limit->setAttack(2);
-    limit->setDecay(20);
+    limit->setRatio(0.05);
+    limit->setAttack(0.1);
+    limit->setDecay(50);
     limit->setOutputGain(1);
     prev_src->registerSink(limit, true);
     prev_src = limit;
   }
-
+  else
+  {
     // Clip audio to limit its amplitude
   AudioClipper *clipper = new AudioClipper;
   clipper->setClipLevel(0.98);
@@ -630,6 +644,8 @@ bool LocalRxBase::initialize(void)
 #endif
   prev_src->registerSink(splatter_filter, true);
   prev_src = splatter_filter;
+}
+
   
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
@@ -733,11 +749,9 @@ bool LocalRxBase::addToneDetector(float fq, int bw, float thresh,
 {
   //printf("Adding tone detector with fq=%d  bw=%d  req_dur=%d\n",
   //    	 fq, bw, required_duration);
-  ToneDetector *det = new ToneDetector(fq, 2*bw, required_duration);
+  ToneDetector *det = new ToneDetector(fq, bw, required_duration);
   assert(det != 0);
   det->setPeakThresh(thresh);
-  det->setDetectOverlapPercent(75);
-  det->setDetectToneFrequencyTolerancePercent(50.0f * bw / fq);
   det->detected.connect(sigc::mem_fun(*this, &LocalRxBase::onToneDetected));
   
   tone_dets->addSink(det, true);
@@ -773,17 +787,6 @@ void LocalRxBase::reset(void)
   }
 } /* LocalRxBase::reset */
 
-
-void LocalRxBase::registerFullbandSink(Async::AudioSink* sink)
-{
-  fullband_splitter->addSink(sink);
-} /* LocalRxBase::registerFullbandSink */
-
-
-void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
-{
-  fullband_splitter->removeSink(sink);
-} /* LocalRxBase::unregisterFullbandSink */
 
 
 /****************************************************************************
