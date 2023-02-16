@@ -521,13 +521,14 @@ bool LocalRxBase::initialize(void)
 
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
-//Änderung RX VoiceBndFilter ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+//Änderung RX VoiceBandFilter nach DL1JAE ++++++++++++++++++++++++++++++++++
 string filterdesc;
 if (cfg().getValue(name(),"RX_AUDIO_FILTER",filterdesc))
 {
-    AudioFilter *voiceband_filter = new AudioFilter(filterdesc);
-    prev_src->registerSink(voiceband_filter, true);
-    prev_src = voiceband_filter;
+  AudioFilter *voiceband_filter = new AudioFilter(filterdesc);
+  prev_src->registerSink(voiceband_filter, true);
+  prev_src = voiceband_filter;
 }
 else
 {
@@ -539,7 +540,7 @@ else
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
 }
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
