@@ -225,6 +225,8 @@ class SquelchCtcss : public Squelch
 	return false;
       }
 
+      cfg.getValue(rx_name, "CTCSS_EMIT_TONE_DETECTED", m_emit_tone_detected);
+
       m_splitter = new Async::AudioSplitter;
 
       for (FqList::const_iterator it = ctcss_fqs.begin();
@@ -280,10 +282,36 @@ class SquelchCtcss : public Squelch
             break;
           }
 
+          case 2:
+          {
+            //std::cout << "### CTCSS mode: Estimated SNR\n";
+            //det->setDetectBw(6.0f);
+            det->setDetectUseWindowing(false);
+            det->setDetectPeakThresh(0.0f);
+            //det->setDetectPeakToTotPwrThresh(0.6f);
+            det->setDetectSnrThresh(open_threshs[ctcss_fq], bpf_high - bpf_low);
+            det->setDetectStableCountThresh(1);
+
+            //det->setUndetectBw(8.0f);
+            det->setUndetectUseWindowing(false);
+            det->setUndetectPeakThresh(0.0f);
+            //det->setUndetectPeakToTotPwrThresh(0.3f);
+            det->setUndetectSnrThresh(close_threshs[ctcss_fq], bpf_high - bpf_low);
+            det->setUndetectStableCountThresh(2);
+
+              // Set up CTCSS band pass filter
+            Async::AudioFilter *filter =
+              new Async::AudioFilter(filter_spec.str());
+            filter->registerSink(det, true);
+            sink = filter;
+            break;
+          }
+
+          default:
           case 4:
           {
             std::cout << "### CTCSS mode 4: Overlap + Estimated SNR + "
-                         "tone frequency 0.75% tolerance (experimental)\n";
+                         "tone frequency 0.75% tolerance\n";
 
             static const float OVERLAP_PERCENT    = 75.0f;
             static const float TONE_FQ_TOLERANCE  = 0.75f;
@@ -303,32 +331,6 @@ class SquelchCtcss : public Squelch
             det->setUndetectUseWindowing(USE_WINDOWING);
             det->setUndetectPeakThresh(0.0f);
             det->setUndetectSnrThresh(close_threshs[ctcss_fq], bpf_high - bpf_low);
-
-              // Set up CTCSS band pass filter
-            Async::AudioFilter *filter =
-              new Async::AudioFilter(filter_spec.str());
-            filter->registerSink(det, true);
-            sink = filter;
-            break;
-          }
-
-          case 2:
-          default:
-          {
-            //std::cout << "### CTCSS mode: Estimated SNR\n";
-            //det->setDetectBw(6.0f);
-            det->setDetectUseWindowing(false);
-            det->setDetectPeakThresh(0.0f);
-            //det->setDetectPeakToTotPwrThresh(0.6f);
-            det->setDetectSnrThresh(open_threshs[ctcss_fq], bpf_high - bpf_low);
-            det->setDetectStableCountThresh(1);
-
-            //det->setUndetectBw(8.0f);
-            det->setUndetectUseWindowing(false);
-            det->setUndetectPeakThresh(0.0f);
-            //det->setUndetectPeakToTotPwrThresh(0.3f);
-            det->setUndetectSnrThresh(close_threshs[ctcss_fq], bpf_high - bpf_low);
-            det->setUndetectStableCountThresh(2);
 
               // Set up CTCSS band pass filter
             Async::AudioFilter *filter =
@@ -421,11 +423,12 @@ class SquelchCtcss : public Squelch
     typedef std::vector<ToneDetector*> DetList;
 
     DetList                       m_dets;
-    Async::AudioSplitter*         m_splitter          = nullptr;
-    ToneDetector*                 m_active_det        = nullptr;
+    Async::AudioSplitter*         m_splitter            = nullptr;
+    ToneDetector*                 m_active_det          = nullptr;
     std::map<float, float>        m_ctcss_snr_offsets;
-    bool                          m_debug             = false;
-    std::unique_ptr<Async::Timer> m_dbg_timer         = nullptr;
+    bool                          m_debug               = false;
+    std::unique_ptr<Async::Timer> m_dbg_timer           = nullptr;
+    bool                          m_emit_tone_detected  = true;
 
     SquelchCtcss(const SquelchCtcss&);
     SquelchCtcss& operator=(const SquelchCtcss&);
@@ -452,6 +455,10 @@ class SquelchCtcss : public Squelch
         {
           m_active_det = det;
           setSignalDetected(true, ss.str());
+          if (m_emit_tone_detected)
+          {
+            toneDetected(det->toneFq());
+          }
         }
       }
       else
