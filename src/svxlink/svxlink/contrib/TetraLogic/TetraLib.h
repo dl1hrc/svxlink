@@ -359,9 +359,9 @@ std::string sdsStatus[] {
   "5 - Outgoing message transmission failed"
 };
 
-std::string GrUnsolic[] {
+//std::string GrUnsolic[] {
 
-};
+//};
 
 // contain decoded data of a lip sds
 struct LipInfo {

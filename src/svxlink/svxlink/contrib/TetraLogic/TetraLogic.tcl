@@ -349,7 +349,7 @@ proc groupcall_begin {issi dissi} {
 #
 # Executed when transmission is granted
 #
-proc tx_grant {} {
+proc tx_grant {tsi} {
 }
 
 

@@ -212,6 +212,18 @@ class Reflector : public sigc::trackable
      */
     void updateRssistate(Json::Value eventmessage);
 
+    /**
+     * @brief  Update register information
+     * @param  event message with register info
+     */
+    void updateRegisterstate(Json::Value eventmessage);
+
+    /**
+     * @brief  Get Sds to forward
+     * @param  event message to forward Sds
+     */
+    void forwardSds(Json::Value eventmessage);
+
   private:
     typedef std::map<Async::FramedTcpConnection*,
                      ReflectorClient*> ReflectorClientConMap;
@@ -246,6 +258,8 @@ class Reflector : public sigc::trackable
       char aprs_tab;
       time_t last_activity;
       time_t sent_last_sds;
+      bool registered;
+      std::string gateway;
     };
     std::map<std::string, User> userdata;
 
@@ -253,6 +267,7 @@ class Reflector : public sigc::trackable
     std::map<std::string, Json::Value> qsoStateMap;
     std::map<std::string, Json::Value> sdsStateMap;
     std::map<std::string, Json::Value> systemStateMap;
+    std::map<std::string, Json::Value> registerStateMap;
 
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);

@@ -135,7 +135,7 @@ class TetraLogic : public Logic
      */
     virtual bool initialize(Async::Config& cfgobj,
                             const std::string& logic_name) override;
-    
+
     /**
      * @brief   is called up when a command from an other logic has been received
      */
@@ -244,6 +244,7 @@ class TetraLogic : public Logic
       time_t last_activity = 0;
       time_t sent_last_sds = 0;
       int rssi = 100;
+      bool registered = false;
     };
     std::map<std::string, User> userdata;
 
@@ -425,6 +426,7 @@ class TetraLogic : public Logic
     void handleVendor(std::string m_message);
     void sendSystemInfo(void);
     std::string jsonToString(Json::Value eventmessage);
+    void registerUser(std::string tsi);
 };  /* class TetraLogic */
 
 

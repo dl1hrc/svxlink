@@ -263,6 +263,8 @@ void Reflector::updateUserdata(Json::Value user_arr)
     m_user.aprs_sym = static_cast<char>(t_userdata.get("sym","").asInt());
     m_user.aprs_tab = static_cast<char>(t_userdata.get("tab","").asInt());
     m_user.comment = t_userdata.get("comment","").asString();
+    m_user.registered = t_userdata.get("registered","").asBool();
+    m_user.gateway = t_userdata.get("gateway","").asString();
     if (t_userdata.get("last_activity","").asUInt() > 0)
     {
       m_user.last_activity = (time_t) t_userdata.get("last_activity","").asUInt();
@@ -279,6 +281,8 @@ void Reflector::updateUserdata(Json::Value user_arr)
       iu->second.aprs_tab = m_user.aprs_tab;
       iu->second.comment = m_user.comment;
       iu->second.location = m_user.location;
+      iu->second.registered = m_user.registered;
+      iu->second.gateway = m_user.gateway;
       if (m_user.last_activity)
       {
         iu->second.last_activity = m_user.last_activity;
@@ -309,7 +313,23 @@ void Reflector::updateUserdata(Json::Value user_arr)
 void Reflector::updateSdsdata(Json::Value eventmessage)
 {
   std::string s = eventmessage.get("source","").asString();
-  sdsStateMap[s] = eventmessage;
+
+  std::map<std::string, Json::Value>::iterator it = sdsStateMap.find(s);
+  if (it != sdsStateMap.end())
+  {
+    it->second.append(eventmessage);
+  }
+  else
+  {
+    sdsStateMap[s][0] = eventmessage;
+  }
+
+  // store no more than 15 Sds entries
+  if (sdsStateMap.size() > 15)
+  {
+    it = sdsStateMap.begin();
+    sdsStateMap.erase(it);
+  }
   cout << jsonToString(eventmessage) << endl;
 } /* Reflector::updateSdsdata */
 
@@ -336,6 +356,80 @@ void Reflector::updateSysteminfostate(Json::Value eventmessage)
   systemStateMap[s] = eventmessage;
   cout << jsonToString(eventmessage) << endl;
 } /* Reflector::updateSysteminfostate */
+
+
+void Reflector::updateRegisterstate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();  // Reflectorcall
+  Json::Value js = eventmessage["data"];
+  std::map<std::string, Json::Value>::iterator it = registerStateMap.find(s);
+
+  if (it != registerStateMap.end())
+  {
+    if (it->first == s)
+    {
+      it->second = js;
+    }
+  }
+  else
+  {
+    registerStateMap[s] = js;
+  }
+
+  // scan in the new Json::Array and update userdata
+  it = registerStateMap.find(s);
+
+  Json::Value t_userdata = it->second;
+  std::map<std::string, User>::iterator iu;
+
+  // scan the userdata dataset and update the last activitys and changes
+  for (iu = userdata.begin(); iu != userdata.end(); iu++)
+  {
+
+    if (iu->second.call == t_userdata.get("call","").asString())
+    {
+      iu->second.registered = t_userdata.get("registered","").asBool();
+      iu->second.last_activity = t_userdata.get("last_activity","").asUInt();
+      iu->second.gateway = t_userdata.get("gateway","").asString();
+      cout << "UpdateRegisterstate: Call=" << iu->second.call << ", registered"
+      << (iu->second.registered ? "TRUE" : "FALSE") << ", last_act=" << iu->second.last_activity
+      << ", GW=" << iu->second.gateway << endl;
+    }
+  }
+  cout << jsonToString(eventmessage) << endl;
+} /* Reflector::updateSysteminfostate */
+
+
+void Reflector::forwardSds(Json::Value eventmessage)
+{
+  std::string source_call = eventmessage.get("source","").asString();
+  std::string dest_call = eventmessage.get("call","").asString();
+  std::string gateway = eventmessage.get("gateway","").asString();
+  std::string msg = jsonToString(eventmessage);
+
+  // scan the userdata dataset and look for the last activity
+  std::map<std::string, User>::iterator iu;
+
+  for (iu = userdata.begin(); iu != userdata.end(); iu++)
+  {
+    if (iu->second.call == dest_call && iu->second.registered)
+    {
+      // send eventmessage to gateway
+      for (const auto& item : m_client_con_map)
+      {
+        ReflectorClient *client = item.second;
+        if (client->conState() == ReflectorClient::STATE_CONNECTED &&
+           client->callsign() == gateway && v2_client_filter(client))
+        {
+          client->sendMsg(MsgStateEvent("Reflector", "ForwardSds:info", msg));
+          cout << "Forwarding Sds: " << source_call << "->" << client->callsign() << "->"
+               << gateway << "->" << dest_call << endl;
+        }
+      }
+    }
+  }
+  cout << jsonToString(eventmessage) << endl;
+} /* Reflector::forwardSds */
 
 
 void Reflector::nodeList(std::vector<std::string>& nodes) const
@@ -766,6 +860,7 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
     node["Qso::info"] = qsoStateMap[client->callsign()];
     node["Sds::info"] = sdsStateMap[client->callsign()];
     node["System::info"] = systemStateMap[client->callsign()];
+    node["Register::info"] = registerStateMap[client->callsign()];
 
     if (node.isMember("qth") && node["qth"].isArray())
     {

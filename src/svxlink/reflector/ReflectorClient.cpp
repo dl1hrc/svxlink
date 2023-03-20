@@ -690,14 +690,15 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     sendError("Illegal MsgStateEvent protocol message received");
     return;
   }
-  /*cout << "### ReflectorClient::handleStateEvent:"
-       << " src=" << m_callsign
-       << " name=" << msg.name()
-       << " msg=" << msg.msg()
-       << std::endl;
-  */
+//  cout << "### ReflectorClient::handleStateEvent:"
+//       << " src=" << m_callsign
+//       << " name=" << msg.name()
+//       << " msg=" << msg.msg()
+//       << std::endl;
+
   Json::Value eventmessage;
   Json::Reader reader;
+  Json::Value em;
   bool b = reader.parse(msg.msg(), eventmessage);
   if (!b)
   {
@@ -724,7 +725,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     em["source"] = m_callsign;
     m_reflector->updateSdsdata(em);
   }
-  else if (msg.name() == "QsoInfo:state")
+  else if (msg.name() == "Qso:info")
   {
     Json::Value em;
     if (eventmessage.isArray())
@@ -736,6 +737,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
       em = eventmessage;
     }
     em["source"] = m_callsign;
+    em["tg"] = m_current_tg;
     m_reflector->updateQsostate(em);
   }
   else if (msg.name() == "Rssi:info")
@@ -747,6 +749,18 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   {
     eventmessage["source"] = m_callsign;
     m_reflector->updateSysteminfostate(eventmessage);
+  }
+  else if (msg.name() == "Register:info")
+  {
+    Json::Value em;
+    em["source"] = m_callsign;
+    em["data"] = eventmessage;
+    m_reflector->updateRegisterstate(em);
+  }
+  else if (msg.name() == "ForwardSds:info")
+  {
+    eventmessage["source"] = m_callsign;
+    m_reflector->forwardSds(eventmessage);
   }
 } /* ReflectorClient::handleStateEvent */
 
