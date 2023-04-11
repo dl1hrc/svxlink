@@ -477,7 +477,7 @@ bool LocalTx::initialize(void)
     prev_src->registerSink(preemph, true);
     prev_src = preemph;
   }
-  
+
   string filterdesc;
   if (cfg.getValue(name(), "AUDIO_FILTER", filterdesc))
   {
@@ -486,7 +486,7 @@ bool LocalTx::initialize(void)
     prev_src->registerSink(additional_audiofilter, true);
     prev_src = additional_audiofilter;
   }
-  
+
   /*
   AudioCompressor *limit = new AudioCompressor;
   limit->setThreshold(-1);
