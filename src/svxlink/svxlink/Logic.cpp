@@ -89,7 +89,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "LogicCmds.h"
 #include "Logic.h"
 #include "QsoRecorder.h"
-#include "LinkManager.h"
+//#include "LinkManager.h"
 #include "DtmfDigitHandler.h"
 
 
@@ -152,9 +152,8 @@ using namespace SvxLink;
  *
  ****************************************************************************/
 
-Logic::Logic(Config &cfg, const string& name)
-  : LogicBase(cfg, name),
-    m_rx(0),  	      	      	            m_tx(0),
+Logic::Logic(void)
+  : m_rx(0),  	      	      	            m_tx(0),
     msg_handler(0), 	      	            active_module(0),
     exec_cmd_on_sql_close_timer(-1),        rgr_sound_timer(-1),
     report_ctcss(0.0f),                     event_handler(0),
@@ -170,7 +169,8 @@ Logic::Logic(Config &cfg, const string& name)
     tx_ctcss_mask(0),
     currently_set_tx_ctrl_mode(Tx::TX_OFF), is_online(true),
     dtmf_digit_handler(0),                  state_pty(0),
-    dtmf_ctrl_pty(0),                       command_pty(0)
+    dtmf_ctrl_pty(0),                       command_pty(0),
+    m_ctcss_to_tg_timer(-1),                m_ctcss_to_tg_last_fq(0.0f)
 {
   rgr_sound_timer.expired.connect(sigc::hide(
         mem_fun(*this, &Logic::sendRgrSound)));
@@ -179,18 +179,9 @@ Logic::Logic(Config &cfg, const string& name)
 } /* Logic::Logic */
 
 
-Logic::~Logic(void)
+bool Logic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 {
-  cleanup();
-  delete logic_con_out;
-  delete logic_con_in;
-  delete dtmf_digit_handler;
-} /* Logic::~Logic */
-
-
-bool Logic::initialize(void)
-{
-  if (!LogicBase::initialize())
+  if (!LogicBase::initialize(cfgobj, logic_name))
   {
     return false;
   }
@@ -404,7 +395,7 @@ bool Logic::initialize(void)
   AudioSource *prev_rx_src = 0;
 
     // Create the RX object
-  cout << "Loading RX: " << rx_name << endl;
+  cout << name() << ": Loading RX \"" << rx_name << "\"" << endl;
   m_rx = RxFactory::createNamedRx(cfg(), rx_name);
   if ((m_rx == 0) || !rx().initialize())
   {
@@ -414,7 +405,15 @@ bool Logic::initialize(void)
     cleanup();
     return false;
   }
-  rx().squelchOpen.connect(mem_fun(*this, &Logic::squelchOpen));
+  rx().squelchOpen.connect([&](bool is_open) {
+        if (!is_open)
+        {
+          //std::cout << "### Logic::[]: Disable CTCSS to TG timer"
+          //          << std::endl;
+          m_ctcss_to_tg_timer.setEnable(false);
+        }
+        squelchOpen(is_open);
+      });
   rx().dtmfDigitDetected.connect(mem_fun(*this, &Logic::dtmfDigitDetectedP));
   rx().selcallSequenceDetected.connect(
 	mem_fun(*this, &Logic::selcallSequenceDetected));
@@ -565,7 +564,7 @@ bool Logic::initialize(void)
   prev_tx_src = tx_audio_mixer;
 
     // Create the TX object
-  cout << "Loading TX: " << tx_name << endl;
+  std::cout << name() << ": Loading TX \"" << tx_name << "\"" << endl;
   m_tx = TxFactory::createNamedTx(cfg(), tx_name);
   if ((m_tx == 0) || !tx().initialize())
   {
@@ -679,6 +678,27 @@ bool Logic::initialize(void)
   exec_cmd_on_sql_close_timer.expired.connect(sigc::hide(
       mem_fun(dtmf_digit_handler, &DtmfDigitHandler::forceCommandComplete)));
 
+  int ctcss_to_tg_delay = 1000;
+  cfg().getValue(name(), "CTCSS_TO_TG_DELAY", ctcss_to_tg_delay);
+  m_ctcss_to_tg_timer.setTimeout(ctcss_to_tg_delay);
+  m_ctcss_to_tg_timer.expired.connect([&](Async::Timer* t)
+      {
+        //std::cout << "### ctcss_to_tg_timer expired: m_ctcss_to_tg_last_fq="
+        //          << m_ctcss_to_tg_last_fq << std::endl;
+        t->setEnable(false);
+        uint16_t uint_fq = static_cast<uint16_t>(
+            round(10.0f*m_ctcss_to_tg_last_fq));
+        auto it = m_ctcss_to_tg.find(uint_fq);
+        if (it != m_ctcss_to_tg.end())
+        {
+          uint32_t tg = it->second;
+          //cout << "### Map CTCSS " << m_ctcss_to_tg_last_fq << " to TG #"
+          //     << tg << endl;
+          setReceivedTg(tg);
+        }
+        m_ctcss_to_tg_last_fq = 0.0f;
+      });
+
   typedef std::vector<SvxLink::SepPair<float, uint32_t> > CtcssToTgVec;
   CtcssToTgVec ctcss_to_tg;
   if (!cfg().getValue(name(), "CTCSS_TO_TG", ctcss_to_tg, true))
@@ -690,23 +710,18 @@ bool Logic::initialize(void)
   for (CtcssToTgVec::const_iterator it = ctcss_to_tg.begin();
        it != ctcss_to_tg.end(); ++it)
   {
-    int bw = 2;
-    if (it->first > 300)
-    {
-      bw = 25;
-    }
-    if (rx().addToneDetector(it->first, bw, 10, 1000))
-    {
-      uint16_t uint_fq = static_cast<uint16_t>(round(10.0f*it->first));
-      uint32_t tg = it->second;
-      m_ctcss_to_tg[uint_fq] = tg;
-    }
-    else
-    {
-      cerr << "*** WARNING: Could not setup tone detector for CTCSS "
-           << it->first << " to TG #" << it->second << " map in logic "
-           << name() << endl;
-    }
+    uint16_t uint_fq = static_cast<uint16_t>(round(10.0f*it->first));
+    uint32_t tg = it->second;
+    m_ctcss_to_tg[uint_fq] = tg;
+    //if (it->first > 300)
+    //{
+    //  if (!rx().addToneDetector(it->first, 25, 10, 1000))
+    //  {
+    //    cerr << "*** WARNING: Could not setup tone detector for CTCSS "
+    //         << it->first << " to TG #" << it->second << " map in logic "
+    //         << name() << endl;
+    //  }
+    //}
   }
   rx().toneDetected.connect(mem_fun(*this, &Logic::detectedTone));
 
@@ -1016,8 +1031,19 @@ void Logic::remoteReceivedTgUpdated(LogicBase *src_logic, uint32_t tg)
  *
  ****************************************************************************/
 
+Logic::~Logic(void)
+{
+  cleanup();
+  delete logic_con_out;
+  delete logic_con_in;
+  delete dtmf_digit_handler;
+} /* Logic::~Logic */
+
+
 void Logic::squelchOpen(bool is_open)
 {
+  //std::cout << "### Logic::squelchOpen: is_open=" << is_open << std::endl;
+
   if (active_module != 0)
   {
     active_module->squelchOpen(is_open);
@@ -1274,8 +1300,8 @@ void Logic::loadModules(void)
 
 void Logic::loadModule(const string& module_cfg_name)
 {
-  cout << "Loading module \"" << module_cfg_name << "\" into logic \""
-       << name() << "\"\n";
+  std::cout << name() << ": Loading module \"" << module_cfg_name << "\""
+            << std::endl;
 
   string module_path;
   cfg().getValue("GLOBAL", "MODULE_PATH", module_path);
@@ -1691,10 +1717,10 @@ void Logic::cleanup(void)
   rgr_sound_timer.setEnable(false);
   every_minute_timer.stop();
 
-  if (LinkManager::hasInstance())
-  {
-    LinkManager::instance()->deleteLogic(this);
-  }
+  //if (LinkManager::hasInstance())
+  //{
+  //  LinkManager::instance()->deleteLogic(this);
+  //}
 
   delete event_handler;               event_handler = 0;
   delete m_tx;        	      	      m_tx = 0;
@@ -1760,15 +1786,10 @@ void Logic::onPublishStateEvent(const string &event_name, const string &msg)
 
 void Logic::detectedTone(float fq)
 {
-  //cout << name() << ": " << fq << " Hz tone call detected" << endl;
-  uint16_t uint_fq = static_cast<uint16_t>(round(10.0f*fq));
-  std::map<uint16_t, uint32_t>::const_iterator it = m_ctcss_to_tg.find(uint_fq);
-  if (it != m_ctcss_to_tg.end())
-  {
-    uint32_t tg = it->second;
-    //cout << "### Map CTCSS " << fq << " to TG #" << tg << endl;
-    setReceivedTg(tg);
-  }
+  //std::cout << "### Logic::detectedTone[" << name() << "]: " << fq
+  //          << " Hz tone call detected" << endl;
+  m_ctcss_to_tg_last_fq = fq;
+  m_ctcss_to_tg_timer.setEnable(true);
 } /* Logic::detectedTone */
 
 

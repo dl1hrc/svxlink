@@ -136,7 +136,7 @@ class PeakMeter : public AudioPassthrough
       if (i < ret)
       {
       	cout << name
-	     << ": Distorsion detected! Please lower the input volume!\n";
+	     << ": Distortion detected! Please lower the input volume!\n";
       }
       
       return ret;
@@ -437,6 +437,7 @@ bool LocalRxBase::initialize(void)
                          sql_extended_hangtime_thresh);
 
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
+  squelch_det->toneDetected.connect(toneDetected.make_slot());
   fullband_splitter->addSink(squelch_det, true);
 
   squelchOpen.connect(

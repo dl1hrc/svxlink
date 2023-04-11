@@ -10,7 +10,7 @@ used by Async::CppApplication to execute DNS queries.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003-2022 Tobias Blomberg
+Copyright (C) 2003-2023 Tobias Blomberg
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -172,23 +172,20 @@ bool CppDnsLookupWorker::doLookup(void)
   int fd[2];
   if (pipe(fd) != 0)
   {
-    char errbuf[256];
-    strerror_r(errno, errbuf, sizeof(errbuf));
-    std::cerr << "*** ERROR: Could not create pipe: " << errbuf << std::endl;
+    printErrno("ERROR: Could not create pipe");
     setLookupFailed();
     return false;
   }
   m_notifier_watch.setFd(fd[0], FdWatch::FD_WATCH_RD);
   m_notifier_watch.setEnabled(true);
 
-  ThreadContext ctx;
-  ctx.label = dns().label();
-  ctx.type = dns().type();
-  ctx.notifier_wr = fd[1];
-  ctx.anslen = 0;
-  ctx.thread_cerr.clear();
-  m_result = std::move(std::async(std::launch::async, workerFunc,
-        std::move(ctx)));
+  m_ctx = std::unique_ptr<ThreadContext>(new ThreadContext);
+  m_ctx->label = dns().label();
+  m_ctx->type = dns().type();
+  m_ctx->notifier_wr = fd[1];
+  m_ctx->anslen = 0;
+  m_ctx->thread_cerr.clear();
+  m_result = std::async(std::launch::async, workerFunc, std::ref(*m_ctx));
 
   return true;
 
@@ -199,13 +196,7 @@ void CppDnsLookupWorker::abortLookup(void)
 {
   if (m_result.valid())
   {
-    const ThreadContext& ctx(m_result.get());
-
-    if (ctx.addrinfo != nullptr)
-    {
-      freeaddrinfo(ctx.addrinfo);
-    }
-    //m_result = std::move(std::future<ThreadContext>());
+    m_result.get();
   }
 
   int fd = m_notifier_watch.fd();
@@ -214,6 +205,8 @@ void CppDnsLookupWorker::abortLookup(void)
     m_notifier_watch.setFd(-1, FdWatch::FD_WATCH_RD);
     close(fd);
   }
+
+  m_ctx.reset();
 } /* CppDnsLookupWorker::abortLookup */
 
 
@@ -239,8 +232,7 @@ void CppDnsLookupWorker::abortLookup(void)
  * Bugs:      
  *----------------------------------------------------------------------------
  */
-CppDnsLookupWorker::ThreadContext CppDnsLookupWorker::workerFunc(
-    CppDnsLookupWorker::ThreadContext ctx)
+void CppDnsLookupWorker::workerFunc(CppDnsLookupWorker::ThreadContext& ctx)
 {
   std::ostream& th_cerr = ctx.thread_cerr;
 
@@ -320,7 +312,7 @@ CppDnsLookupWorker::ThreadContext CppDnsLookupWorker::workerFunc(
       state.options = RES_DEFAULT;
       const char *dname = ctx.label.c_str();
       ctx.anslen = res_nsearch(&state, dname, ns_c_in, qtype,
-                               ctx.answer, NS_PACKETSZ);
+                               ctx.answer, sizeof(ctx.answer));
       if (ctx.anslen == -1)
       {
         th_cerr << "*** ERROR: Name resolver failure -- res_nsearch: "
@@ -343,8 +335,6 @@ CppDnsLookupWorker::ThreadContext CppDnsLookupWorker::workerFunc(
 
   close(ctx.notifier_wr);
   ctx.notifier_wr = -1;
-
-  return std::move(ctx);
 } /* CppDnsLookupWorker::workerFunc */
 
 
@@ -370,22 +360,22 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
   close(w->fd());
   w->setFd(-1, FdWatch::FD_WATCH_RD);
 
-  const ThreadContext& ctx(m_result.get());
+  m_result.get();
 
-  const std::string& thread_errstr = ctx.thread_cerr.str();
+  const std::string& thread_errstr = m_ctx->thread_cerr.str();
   if (!thread_errstr.empty())
   {
     std::cerr << thread_errstr;
     setLookupFailed();
   }
 
-  if (ctx.type == DnsResourceRecord::Type::A)
+  if (m_ctx->type == DnsResourceRecord::Type::A)
   {
-    if (ctx.addrinfo != nullptr)
+    if (m_ctx->addrinfo != nullptr)
     {
       struct addrinfo *entry;
       std::vector<IpAddress> the_addresses;
-      for (entry = ctx.addrinfo; entry != 0; entry = entry->ai_next)
+      for (entry = m_ctx->addrinfo; entry != 0; entry = entry->ai_next)
       {
         IpAddress ip_addr(
             reinterpret_cast<struct sockaddr_in*>(entry->ai_addr)->sin_addr);
@@ -398,35 +388,35 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
         {
           the_addresses.push_back(ip_addr);
           addResourceRecord(
-              new DnsResourceRecordA(ctx.label, 0, ip_addr));
+              new DnsResourceRecordA(m_ctx->label, 0, ip_addr));
         }
       }
-      freeaddrinfo(ctx.addrinfo);
+      m_ctx.reset();
     }
   }
-  else if (ctx.type == DnsResourceRecord::Type::PTR)
+  else if (m_ctx->type == DnsResourceRecord::Type::PTR)
   {
-    if (ctx.host[0] != '\0')
+    if (m_ctx->host[0] != '\0')
     {
       addResourceRecord(
-          new DnsResourceRecordPTR(ctx.label, 0, ctx.host));
+          new DnsResourceRecordPTR(m_ctx->label, 0, m_ctx->host));
     }
   }
   else
   {
-    if (ctx.anslen == -1)
+    if (m_ctx->anslen == -1)
     {
       workerDone();
       return;
     }
 
-    char errbuf[256];
     ns_msg msg;
-    int ret = ns_initparse(ctx.answer, ctx.anslen, &msg);
+    int ret = ns_initparse(m_ctx->answer, m_ctx->anslen, &msg);
     if (ret == -1)
     {
-      strerror_r(ret, errbuf, sizeof(errbuf));
-      std::cerr << "*** WARNING: ns_initparse failed: " << errbuf << std::endl;
+      std::stringstream ss;
+      ss << "WARNING: ns_initparse failed (anslen=" << m_ctx->anslen << ")";
+      printErrno(ss.str());
       setLookupFailed();
       workerDone();
       return;
@@ -443,9 +433,7 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
       ret = ns_parserr(&msg, ns_s_an, rrnum, &rr);
       if (ret == -1)
       {
-        strerror_r(errno, errbuf, sizeof(errbuf));
-        std::cerr << "*** WARNING: DNS lookup failure in ns_parserr: "
-                  << errbuf << std::endl;
+        printErrno("WARNING: DNS lookup failure in ns_parserr");
         setLookupFailed();
         continue;
       }
@@ -480,9 +468,7 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
                                    exp_dn, NS_MAXDNAME);
           if (ret == -1)
           {
-            strerror_r(errno, errbuf, sizeof(errbuf));
-            std::cerr << "*** WARNING: DNS lookup failure in "
-                         "ns_name_uncompress: " << errbuf << std::endl;
+            printErrno("WARNING: DNS lookup failure in ns_name_uncompress");
             setLookupFailed();
             continue;
           }
@@ -500,9 +486,7 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
               exp_dn, NS_MAXDNAME);
           if (ret == -1)
           {
-            strerror_r(errno, errbuf, sizeof(errbuf));
-            std::cerr << "*** WARNING: DNS lookup failure in "
-                         "ns_name_uncompress" << errbuf << std::endl;
+            printErrno("WARNING: DNS lookup failure in ns_name_uncompress");
             setLookupFailed();
             continue;
           }
@@ -526,9 +510,7 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
               exp_dn, NS_MAXDNAME);
           if (ret == -1)
           {
-            strerror_r(errno, errbuf, sizeof(errbuf));
-            std::cerr << "*** WARNING: DNS lookup failure in "
-                         "ns_name_uncompress: " << errbuf << std::endl;
+            printErrno("WARNING: DNS lookup failure in ns_name_uncompress");
             setLookupFailed();
             continue;
           }
@@ -551,6 +533,19 @@ void CppDnsLookupWorker::notificationReceived(FdWatch *w)
   workerDone();
 } /* CppDnsLookupWorker::notificationReceived */
 
+
+void CppDnsLookupWorker::printErrno(const std::string& msg)
+{
+  char errbuf[1024];
+  char* errmsg = errbuf;
+#if (_POSIX_C_SOURCE >= 200112L) && ! _GNU_SOURCE
+  int ret = strerror_r(errno, errbuf, sizeof(errbuf));
+  assert(ret == 0);
+#else
+  errmsg = strerror_r(errno, errbuf, sizeof(errbuf));
+#endif
+  std::cerr << "*** " << msg << ": " << errmsg << std::endl;
+} /* CppDnsLookupWorker::printErrno */
 
 
 /*

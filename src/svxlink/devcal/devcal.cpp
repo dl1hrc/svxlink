@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -83,6 +83,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 using namespace std;
+using namespace std::placeholders;
 using namespace Async;
 
 
@@ -484,7 +485,7 @@ static const unsigned audio_ch = 0;
 int main(int argc, const char *argv[])
 {
   cout << PROGRAM_NAME " v" DEVCAL_VERSION
-          " Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX\n\n";
+          " Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX\n\n";
   cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
           "This is free software, and you\n";
   cout << "are welcome to redistribute it in accordance with the "
@@ -501,7 +502,7 @@ int main(int argc, const char *argv[])
 
   vector<float> mod_idxs(mod_fqs.size());
   transform(mod_fqs.begin(), mod_fqs.end(), mod_idxs.begin(),
-      bind1st(divides<float>(), caldev));
+      std::bind(divides<float>(), caldev, _1));
   float mod_level = 100.0 * caldev / (maxdev * pow(10.0, headroom_db / 20.0));
   cout << "--- Modulation frequencies [Hz] : ";
   copy(mod_fqs.begin(), mod_fqs.end(), ostream_iterator<float>(cout, " "));

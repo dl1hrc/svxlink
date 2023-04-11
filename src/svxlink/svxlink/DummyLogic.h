@@ -1,12 +1,12 @@
 /**
-@file	 DummyLogic.h
+@file    DummyLogic.h
 @brief   A simple dummy logic core that does not do anything
 @author  Tobias Blomberg / SM0SVX
-@date	 2017-02-10
+@date    2017-02-10
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2017 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -42,7 +42,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-#include <AsyncAudioDebugger.h>
 
 
 /****************************************************************************
@@ -103,58 +102,59 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 /**
-@brief	A simple dummy logic core that does not do anything
+@brief  A simple dummy logic core that does not do anything
 @author Tobias Blomberg / SM0SVX
 @date   2017-02-10
 
 The dummy logic core is just an example of the simplest possible logic core. It
 does not do anything but printing debug info when receiving audio from another
-logic core.
+logic core. It's primary purpose is to serve as a start for writing new logic
+cores.
 */
 class DummyLogic : public LogicBase
 {
   public:
     /**
-     * @brief 	Constructor
-     * @param   cfg A previously initialized configuration object
-     * @param   name The name of the logic core
+     * @brief 	Default constructor
      */
-    DummyLogic(Async::Config& cfg, const std::string& name)
-      : LogicBase(cfg, name)
+    DummyLogic(void);
+
+    /**
+     * @brief   Initialize this logic
+     * @param   cfgobj      A previously initialized config object
+     * @param   logic_name  The name of the logic core
+     * @return  Returns \em true on success or \em false on failure
+     */
+    virtual bool initialize(Async::Config& cfgobj,
+                            const std::string& logic_name) override;
+
+    /**
+     * @brief   Get the audio pipe sink used for writing audio into this logic
+     * @return  Returns an audio pipe sink object
+     */
+    virtual Async::AudioSink *logicConIn(void) override
     {
-      m_logic_con_in = new Async::AudioDebugger;
-      m_logic_con_out = new Async::AudioDebugger;
+      return m_logic_con_in;
     }
 
     /**
-     * @brief 	Destructor
+     * @brief   Get the audio pipe source used for reading audio from this logic
+     * @return  Returns an audio pipe source object
      */
-    ~DummyLogic(void)
+    virtual Async::AudioSource *logicConOut(void) override
     {
-      delete m_logic_con_in;
-      delete m_logic_con_out;
+      return m_logic_con_out;
     }
-
-    /**
-     * @brief 	Get the audio pipe sink used for writing audio into this logic
-     * @return	Returns an audio pipe sink object
-     */
-    virtual Async::AudioSink *logicConIn(void) { return m_logic_con_in; }
-
-    /**
-     * @brief 	Get the audio pipe source used for reading audio from this logic
-     * @return	Returns an audio pipe source object
-     */
-    virtual Async::AudioSource *logicConOut(void) { return m_logic_con_out; }
 
   protected:
+    /**
+     * @brief   Destructor
+     */
+    virtual ~DummyLogic(void) override;
 
   private:
-    Async::AudioDebugger *m_logic_con_in;
-    Async::AudioDebugger *m_logic_con_out;
-
-    DummyLogic(const DummyLogic&);
-    DummyLogic& operator=(const DummyLogic&);
+    Async::AudioDebugger *m_logic_con_in  = nullptr;
+    Async::AudioDebugger *m_logic_con_out = nullptr;
 
 };  /* class DummyLogic */
 

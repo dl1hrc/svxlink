@@ -107,6 +107,17 @@ using namespace Async;
 
 /****************************************************************************
  *
+ * Exported Global functions
+ *
+ ****************************************************************************/
+
+extern "C" {
+  LogicBase* construct(void) { return new ReflectorLogic; }
+}
+
+
+/****************************************************************************
+ *
  * Local Global Variables
  *
  ****************************************************************************/
@@ -119,8 +130,8 @@ using namespace Async;
  *
  ****************************************************************************/
 
-ReflectorLogic::ReflectorLogic(Async::Config& cfg, const std::string& name)
-  : LogicBase(cfg, name), m_msg_type(0), m_udp_sock(0),
+ReflectorLogic::ReflectorLogic(void)
+  : m_msg_type(0), m_udp_sock(0),
     m_logic_con_in(0), m_logic_con_out(0),
     m_reconnect_timer(60000, Timer::TYPE_ONESHOT, false),
     m_next_udp_tx_seq(0), m_next_udp_rx_seq(0),
@@ -168,26 +179,21 @@ ReflectorLogic::ReflectorLogic(Async::Config& cfg, const std::string& name)
 } /* ReflectorLogic::ReflectorLogic */
 
 
-ReflectorLogic::~ReflectorLogic(void)
+bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 {
-  disconnect();
-  delete m_event_handler;
-  m_event_handler = 0;
-  delete m_udp_sock;
-  m_udp_sock = 0;
-  delete m_logic_con_in;
-  m_logic_con_in = 0;
-  delete m_enc;
-  m_enc = 0;
-  delete m_dec;
-  m_dec = 0;
-  delete m_logic_con_in_valve;
-  m_logic_con_in_valve = 0;
-} /* ReflectorLogic::~ReflectorLogic */
+    // Must create logic connection objects before calling LogicBase::initialize
+  m_logic_con_in = new Async::AudioStreamStateDetector;
+  m_logic_con_in->sigStreamStateChanged.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::onLogicConInStreamStateChanged));
+  m_logic_con_out = new Async::AudioStreamStateDetector;
+  m_logic_con_out->sigStreamStateChanged.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::onLogicConOutStreamStateChanged));
 
+  if (!LogicBase::initialize(cfgobj, logic_name))
+  {
+    return false;
+  }
 
-bool ReflectorLogic::initialize(void)
-{
   cfg().getValue(name(), "VERBOSE", m_verbose);
 
   std::vector<std::string> hosts;
@@ -310,10 +316,6 @@ bool ReflectorLogic::initialize(void)
   cfg().getValue(name(), "AUDIO_CODEC", audio_codec);
 #endif
 
-    // Create logic connection incoming audio passthrough
-  m_logic_con_in = new Async::AudioStreamStateDetector;
-  m_logic_con_in->sigStreamStateChanged.connect(
-      sigc::mem_fun(*this, &ReflectorLogic::onLogicConInStreamStateChanged));
   AudioSource *prev_src = m_logic_con_in;
 
   cfg().getValue(name(), "MUTE_FIRST_TX_LOC", m_mute_first_tx_loc);
@@ -344,9 +346,6 @@ bool ReflectorLogic::initialize(void)
     fifo->setPrebufSamples(jitter_buffer_delay * INTERNAL_SAMPLE_RATE / 1000);
   }
 
-  m_logic_con_out = new Async::AudioStreamStateDetector;
-  m_logic_con_out->sigStreamStateChanged.connect(
-      sigc::mem_fun(*this, &ReflectorLogic::onLogicConOutStreamStateChanged));
   prev_src->registerSink(m_logic_con_out, true);
   prev_src = 0;
 
@@ -440,11 +439,6 @@ bool ReflectorLogic::initialize(void)
 
   cfg().getValue(name(), "UDP_HEARTBEAT_INTERVAL",
       m_udp_heartbeat_tx_cnt_reset);
-
-  if (!LogicBase::initialize())
-  {
-    return false;
-  }
 
   connect();
 
@@ -599,11 +593,12 @@ void ReflectorLogic::remoteCmdReceived(LogicBase* src_logic,
 void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 {
   //cout << "### ReflectorLogic::remoteReceivedTgUpdated: logic="
-  //     << logic->name() << "  tg=" << tg << endl;
+  //     << logic->name() << "  tg=" << tg
+  //     << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc << endl;
   if ((m_selected_tg == 0) && (tg > 0))
   {
     selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
-    m_tg_local_activity = true;
+    m_tg_local_activity = !m_mute_first_tx_loc;
     m_use_prio = false;
   }
 } /* ReflectorLogic::remoteReceivedTgUpdated */
@@ -734,6 +729,24 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
  *
  ****************************************************************************/
 
+ReflectorLogic::~ReflectorLogic(void)
+{
+  disconnect();
+  delete m_event_handler;
+  m_event_handler = 0;
+  delete m_udp_sock;
+  m_udp_sock = 0;
+  delete m_logic_con_in;
+  m_logic_con_in = 0;
+  delete m_enc;
+  m_enc = 0;
+  delete m_dec;
+  m_dec = 0;
+  delete m_logic_con_in_valve;
+  m_logic_con_in_valve = 0;
+} /* ReflectorLogic::~ReflectorLogic */
+
+
 
 
 /****************************************************************************
@@ -759,6 +772,7 @@ void ReflectorLogic::onConnected(void)
   timerclear(&m_last_talker_timestamp);
   m_con_state = STATE_EXPECT_AUTH_CHALLENGE;
   m_con.setMaxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_SIZE);
+  processEvent("reflector_connection_status_update 1");
 } /* ReflectorLogic::onConnected */
 
 
@@ -786,6 +800,7 @@ void ReflectorLogic::onDisconnected(TcpConnection *con,
     timerclear(&m_last_talker_timestamp);
   }
   m_con_state = STATE_DISCONNECTED;
+  processEvent("reflector_connection_status_update 0");
 } /* ReflectorLogic::onDisconnected */
 
 
@@ -1615,7 +1630,7 @@ void ReflectorLogic::onLogicConInStreamStateChanged(bool is_active,
   }
   else
   {
-    if ((m_logic_con_in_valve != 0) && (m_selected_tg > 0))
+    if ((m_logic_con_in_valve != 0) && m_tg_local_activity)
     {
       m_logic_con_in_valve->setOpen(true);
     }

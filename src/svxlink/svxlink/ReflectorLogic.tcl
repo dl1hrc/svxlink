@@ -31,11 +31,31 @@ variable announce_remote_min_interval 0
 # activity") is active. See configuration variable QSY_PENDING_TIMEOUT.
 variable qsy_pending_active 0
 
+# This variable will be set to 1 if the connection to the reflector is
+# established and to 0 if disconnected.
+variable reflector_connection_established 0
+
 #
 # Checking to see if this is the correct logic core
 #
 if {$logic_name != [namespace tail [namespace current]]} {
   return;
+}
+
+
+#
+# A helper function for announcing a talkgroup.
+# If there is an audio clip matching the name talk_group-<tg> it will be played
+# instead of spelling the digits. Look at the documentation for playMsg for
+# more information on where to put the audio clip.
+#
+#   tg - The talkgroup to announce
+#
+proc say_talkgroup {tg} {
+  if [playMsg "Core" "talk_group-$tg" 0] {
+  } else {
+    spellNumber $tg
+  }
 }
 
 
@@ -57,6 +77,25 @@ proc command_failed {cmd} {
 
 
 #
+# Executed when the reflector connection status is updated
+#
+#   is_established - 0=disconnected, 1=established
+#
+proc reflector_connection_status_update {is_established} {
+  variable reflector_connection_established
+  if {$is_established != $reflector_connection_established} {
+    set reflector_connection_established $is_established
+    #playMsg "Core" "reflector"
+    #if {$is_established} {
+    #  playMsg "Core" "connected"
+    #} else {
+    #  playMsg "Core" "disconnected"
+    #}
+  }
+}
+
+
+#
 # Executed when manual TG announcement is triggered
 #
 proc report_tg_status {} {
@@ -64,16 +103,24 @@ proc report_tg_status {} {
   variable previous_tg
   variable prev_announce_time
   variable prev_announce_tg
+  variable reflector_connection_established
   playSilence 100
+  playMsg "Core" "reflector"
+  if {$reflector_connection_established} {
+    playMsg "Core" "connected"
+  } else {
+    playMsg "Core" "disconnected"
+  }
+  playSilence 200
   if {$selected_tg > 0} {
     set prev_announce_time [clock seconds]
     set prev_announce_tg $selected_tg
     playMsg "Core" "talk_group"
-    spellNumber $selected_tg
+    say_talkgroup $selected_tg
   } else {
     playMsg "Core" "previous"
     playMsg "Core" "talk_group"
-    spellNumber $previous_tg
+    say_talkgroup $previous_tg
   }
 }
 
@@ -109,14 +156,20 @@ proc tg_local_activation {new_tg old_tg} {
   variable prev_announce_time
   variable prev_announce_tg
   variable selected_tg
+  variable reflector_connection_established
 
   #puts "### tg_local_activation"
   if {$new_tg != $old_tg} {
     set prev_announce_time [clock seconds]
     set prev_announce_tg $new_tg
     playSilence 100
+    if {!$reflector_connection_established} {
+      playMsg "Core" "reflector"
+      playMsg "Core" "disconnected"
+      playSilence 200
+    }
     playMsg "Core" "talk_group"
-    spellNumber $new_tg
+    say_talkgroup $new_tg
   }
 }
 
@@ -143,7 +196,7 @@ proc tg_remote_activation {new_tg old_tg} {
     set prev_announce_tg $new_tg
     playSilence 100
     playMsg "Core" "talk_group"
-    spellNumber $new_tg
+    say_talkgroup $new_tg
   }
 }
 
@@ -169,13 +222,19 @@ proc tg_remote_prio_activation {new_tg old_tg} {
 proc tg_command_activation {new_tg old_tg} {
   variable prev_announce_time
   variable prev_announce_tg
+  variable reflector_connection_established
 
   #puts "### tg_command_activation"
   set prev_announce_time [clock seconds]
   set prev_announce_tg $new_tg
   playSilence 100
+  if {!$reflector_connection_established} {
+    playMsg "Core" "reflector"
+    playMsg "Core" "disconnected"
+    playSilence 200
+  }
   playMsg "Core" "talk_group"
-  spellNumber $new_tg
+  say_talkgroup $new_tg
 }
 
 
@@ -189,13 +248,19 @@ proc tg_default_activation {new_tg old_tg} {
   #variable prev_announce_time
   #variable prev_announce_tg
   #variable selected_tg
+  #variable reflector_connection_established
   #puts "### tg_default_activation"
   #if {$new_tg != $old_tg} {
   #  set prev_announce_time [clock seconds]
   #  set prev_announce_tg $new_tg
   #  playSilence 100
+  #  if {!$reflector_connection_established} {
+  #    playMsg "Core" "reflector"
+  #    playMsg "Core" "disconnected"
+  #    playSilence 200
+  #  }
   #  playMsg "Core" "talk_group"
-  #  spellNumber $new_tg
+  #  say_talkgroup $new_tg
   #}
 }
 
@@ -216,7 +281,7 @@ proc tg_qsy {new_tg old_tg} {
   playSilence 100
   playMsg "Core" "qsy"
   #playMsg "Core" "talk_group"
-  spellNumber $new_tg
+  say_talkgroup $new_tg
 }
 
 
@@ -254,7 +319,7 @@ proc tg_qsy_failed {} {
 proc tg_qsy_pending {tg} {
   playSilence 100
   playMsg "Core" "qsy"
-  spellNumber $tg
+  say_talkgroup $tg
   playMsg "Core" "pending"
 }
 
@@ -269,7 +334,7 @@ proc tg_qsy_ignored {tg} {
   playSilence 100
   if {!$qsy_pending_active} {
     playMsg "Core" "qsy"
-    spellNumber $tg
+    say_talkgroup $tg
   }
   playMsg "Core" "ignored"
   playSilence 500
@@ -337,7 +402,7 @@ proc tmp_monitor_add {tg} {
   #puts "### tmp_monitor_add: $tg"
   playSilence 100
   playMsg "Core" "monitor"
-  spellNumber $tg
+  say_talkgroup $tg
 }
 
 
