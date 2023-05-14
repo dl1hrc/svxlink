@@ -56,6 +56,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncAudioCompressor.h>
 #include <AsyncAudioAmp.h>
 #include <AsyncAudioFilter.h>
+#include <AsyncTcpClient.h>
 #include <common.h>
 
 
@@ -89,7 +90,7 @@ using namespace pj;
  *
  ****************************************************************************/
 #define DEFAULT_SIPLIMITER_THRESH  -1.0
-#define PJSIP_VERSION "27112022"
+#define PJSIP_VERSION "14032023"
 
 
 /****************************************************************************
@@ -313,7 +314,7 @@ SipLogic::SipLogic(void)
     logic_msg_handler(0), logic_event_handler(0), report_events_as_idle(false),
     startup_finished(false), logicselector(0), semi_duplex(false),
     sip_preamp_gain(0), m_autoconnect(""), sip_event_handler(0), 
-    sip_msg_handler(0), sipselector(0), m_siploglevel(0)
+    sip_msg_handler(0), sipselector(0), m_siploglevel(0), ignore_reg(false)
 {
   m_call_timeout_timer.expired.connect(
       mem_fun(*this, &SipLogic::callTimeout));
@@ -375,12 +376,12 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   }
 
   cfg().getValue(name(), "SIPPORT", m_sip_port); // SIP udp-port default: 5060
-  
+
   std::string m_sipregistrar;
   cfg().getValue(name(), "SIPREGISTRAR", m_sipregistrar);
   std::string t_sreg = ":";
   t_sreg += to_string(m_sip_port);
-  
+
   if (m_sip_port != 5060 && (m_sipregistrar.find(t_sreg) == std::string::npos))
   {
     cout << "+++ WARNING: The SIPPORT is not the default (5060), so the param "
@@ -608,6 +609,13 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   acc->onState.connect(mem_fun(*this, &SipLogic::onRegState));
   acc->onMessage.connect(mem_fun(*this, &SipLogic::onMessage));
 
+  // setup dns lookup method
+  dns.setLookupParams(getCallerUri(m_sipserver));
+  dns.resultsReady.connect(mem_fun(*this, &SipLogic::onDnsResultsReady));
+  dns.lookup();
+
+  cfg().getValue(name(), "IGNORE_REGISTRATION", ignore_reg);
+
    // number of samples = INTERNAL_SAMPLE_RATE * frameTimeLen /1000
   media = new sip::_AudioMedia(*this, 48);
 
@@ -710,7 +718,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
     splitter->addSink(squelch_det, true);
     cout << name() << ": Simplexmode, using VOX squelch for Sip." << endl;
   }
-  else 
+  else
   {
     cout << name() << ": Semiduplexmode, no Sql used for Sip." << endl;
   }
@@ -776,7 +784,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   sip_event_handler->setVariable("sip_ctrl_pty", dtmf_ctrl_pty_path);
   sip_event_handler->setVariable("sip_proxy_server", m_sipserver);
   sip_event_handler->setVariable("sip_proxy_port", m_sip_port);
-  
+
   sip_event_handler->playFile.connect(mem_fun(*this, &SipLogic::playSipFile));
   sip_event_handler->playSilence.connect(mem_fun(*this, &SipLogic::playSipSilence));
   sip_event_handler->playTone.connect(mem_fun(*this, &SipLogic::playSipTone));
@@ -817,7 +825,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   m_outto_sip = new AudioValve;
   m_outto_sip->setOpen(false);
   sipselector->registerSink(m_outto_sip, true);
-  
+
    // the Audioreader to get and handle the samples later
    // when connected
   m_ar = new AudioReader;
@@ -983,14 +991,25 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
   // todo: accept more than just one call
   if (calls.size() > 1) return;
 
+  stringstream ss;
   sip::_Call *call = new sip::_Call(*acc, iprm.callId);
   pj::CallInfo ci = call->getInfo();
   pj::CallOpParam prm;
   prm.opt.audioCount = 1;
   prm.opt.videoCount = 0;
 
-  std::string caller = getCallerNumber(ci.remoteUri);
+  // check if it is a valid call
+  if (!checkCaller(ci.remoteUri))
+  {
+    cout << "+++ Ignoring invalid call from " << ci.remoteUri
+         << " since it isn't registered at our sip server (" << m_sipserver
+         << ")" << endl;
+    ss << "invalid_call " << ci.remoteUri;
+    processLogicEvent(ss.str());
+    return;
+  }
 
+  std::string caller = getCallerNumber(ci.remoteUri);
   for (std::map<std::string, uint32_t>::const_iterator it = phoneNrTgVec.begin();
       it != phoneNrTgVec.end(); it++)
   {
@@ -1002,9 +1021,9 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
     }
   }
 
-  stringstream ss;
   ss << "ringing \"" << caller << "\"";
   processLogicEvent(ss.str());
+  ss.clear();
 
   if (regexec(reject_incoming_regex, caller.c_str(), 0, 0, 0) == 0)
   {
@@ -1026,16 +1045,40 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
 } /* SipLogic::onIncomingCall */
 
 
+bool SipLogic::checkCaller(std::string caller)
+{
+  if (ignore_reg)
+  {
+    cout << "Do not check the credentials due to "
+         << "configuration (IGNORE_REGISTRATION=1)" << endl;
+    return true;
+  }
+
+  for (const auto& addr : dns.addresses())
+  {
+    if (!addr.isEmpty())
+    {
+      if (addr.toString() == getCallerUri(caller))
+      {
+        cout << "Accepting incoming call from" << caller << "." << endl;
+        return true;
+      }
+    }
+  }
+  return false;
+} /* SipLogic::checkCaller */
+
+
 void SipLogic::registerCall(sip::_Call *call)
 {
   call->onDtmf.connect(mem_fun(*this, &SipLogic::onDtmfDigit));
   call->onMedia.connect(mem_fun(*this, &SipLogic::onMediaState));
   call->onCall.connect(mem_fun(*this, &SipLogic::onCallState));
   call->onMessage.connect(mem_fun(*this, &SipLogic::onMessageInfo));
-  
+
   pj::CallInfo ci = call->getInfo();
   std::string caller = getCallerNumber(ci.remoteUri);
-  
+
   stringstream ss;
   ss << "call_registered \"" << caller << "\"";
   processLogicEvent(ss.str());
@@ -1174,6 +1217,7 @@ void SipLogic::onCallState(sip::_Call *call, pj::OnCallStateParam &prm)
   stringstream ss;
   pj::CallInfo ci = call->getInfo();
   std::string caller = getCallerNumber(ci.remoteUri);
+  std::string uri = getCallerUri(ci.remoteUri);
 
     // incoming call
   if (ci.state == PJSIP_INV_STATE_INCOMING)
@@ -1276,6 +1320,8 @@ void SipLogic::onRegState(sip::_Account *acc, pj::OnRegStateParam &prm)
   ss << "registration_state " << m_sipserver << " "
      << ai.regIsActive << " " << prm.code;
   processLogicEvent(ss.str());
+  dns.setLookupParams(getCallerUri(m_sipserver));
+  dns.lookup();
 } /* SipLogic::onRegState */
 
 
@@ -1286,7 +1332,7 @@ void SipLogic::hangupAllCalls(void)
        it != calls.end(); it++)
   {
     (*it)->hangup(prm);
-  }  
+  }
 } /* SipLogic::hangupAllCalls */
 
 
@@ -1530,6 +1576,35 @@ void SipLogic::unregisterCall(sip::_Call *call)
     //squelch_det->reset();
   }
 } /* SipLogic::unregisterCall */
+
+
+std::string SipLogic::getCallerUri(std::string uri)
+{
+  size_t pos = uri.find('@');
+  if (pos != std::string::npos)
+  {
+    uri.erase(0, pos+1);
+  }
+
+  pos = uri.find(':');
+  if (pos != std::string::npos)
+  {
+    uri = uri.substr(0, pos);
+  }
+
+  pos = uri.find('>');
+  if (pos != std::string::npos)
+  {
+    uri = uri.substr(0,pos);
+  }
+  return uri;
+} /* SipLogic::getCallerUri */
+
+
+void SipLogic::onDnsResultsReady(Async::DnsLookup& dns_lookup)
+{
+} /* SipLogic::onDnsResult */
+
 
 /*
  * This file has not been truncated

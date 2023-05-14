@@ -162,7 +162,7 @@ proc outgoing_call {caller} {
 # Executed if somebody is ringing
 #
 proc ringing {caller} {
-  puts "$caller ringing";
+  puts "$caller is ringing";
   playMsg "SipLogic" "ringtone";
 }
 
@@ -348,6 +348,14 @@ proc account_text_message_received {uri message} {
 #
 proc call_registered {caller} {
 }
+
+
+#
+# Executed if an unregistered user calls the node
+#
+proc invalid_call {caller_name caller_uri} {
+}
+
 
 # end of namespace
 }
