@@ -155,8 +155,8 @@ class LocalRxBase : public Rx
      * @brief 	Set the mute state for this receiver
      * @param 	mute_state The mute state to set for this receiver
      */
-    virtual void setMuteState(MuteState new_mute_state);
-    
+    virtual void setMuteState(MuteState new_mute_state) override;
+
     /**
      * @brief 	Call this function to add a tone detector to the RX
      * @param 	fq The tone frequency to detect
@@ -265,7 +265,6 @@ class LocalRxBase : public Rx
     virtual Async::AudioSource *audioSource(void) = 0;
     
   private:
-    MuteState      	      	mute_state;
     Squelch   	      	      	*squelch_det;
     SigLevDet 	      	        *siglevdet;
     Async::AudioSplitter      	*tone_dets;

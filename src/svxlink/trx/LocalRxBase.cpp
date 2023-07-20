@@ -233,7 +233,7 @@ namespace {
  ****************************************************************************/
 
 LocalRxBase::LocalRxBase(Config &cfg, const std::string& name)
-  : Rx(cfg, name), mute_state(MUTE_ALL),
+  : Rx(cfg, name),
     squelch_det(0), siglevdet(0), /* siglev_offset(0.0), siglev_slope(1.0), */
     tone_dets(0), sql_valve(0), delay(0), sql_tail_elim(0),
     preamp_gain(0), mute_valve(0), sql_hangtime(0), sql_extended_hangtime(0),
@@ -439,7 +439,7 @@ bool LocalRxBase::initialize(void)
                          sql_extended_hangtime_thresh);
 
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
-  squelch_det->toneDetected.connect(toneDetected.make_slot());
+  squelch_det->toneDetected.connect(mem_fun(*this, &LocalRxBase::onToneDetected));
   fullband_splitter->addSink(squelch_det, true);
 
   squelchOpen.connect(
@@ -679,10 +679,12 @@ bool LocalRxBase::initialize(void)
 
 void LocalRxBase::setMuteState(MuteState new_mute_state)
 {
-  std::cout << "### LocalRxBase::setMuteState[" << name()
-            << "]: new_mute_state=" << new_mute_state
-            << " mute_state=" << mute_state
-            << std::endl;
+  auto mute_state = muteState();
+
+  //std::cout << "### LocalRxBase::setMuteState[" << name()
+  //          << "]: new_mute_state=" << new_mute_state
+  //          << " mute_state=" << mute_state
+  //          << std::endl;
 
   while (mute_state != new_mute_state)
   {
@@ -707,7 +709,8 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
           {
             audioClose();
           }
-          //squelch_det->reset();
+          squelch_det->reset();
+          siglevdet->reset();
           setSquelchState(false, "MUTED");
           break;
 
@@ -721,15 +724,17 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       switch (mute_state)
       {
         case MUTE_CONTENT:  // MUTE_ALL -> MUTE_CONTENT
+          mute_valve->setOpen(true);
           if (!audioOpen())
           {
+            Rx::setMuteState(MUTE_ALL);
             return;
           }
           squelch_det->restart();
           break;
 
         case MUTE_NONE:   // MUTE_CONTENT -> MUTE_NONE
-          mute_valve->setOpen(true);
+          //mute_valve->setOpen(true);
           if (squelchIsOpen())
           {
             sql_valve->setOpen(true);
@@ -741,6 +746,7 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       }
     }
   }
+  Rx::setMuteState(mute_state);
 } /* LocalRxBase::setMuteState */
 
 
@@ -818,7 +824,7 @@ void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
 
 void LocalRxBase::sel5Detected(std::string sequence)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     selcallSequenceDetected(sequence);
   }
@@ -838,7 +844,7 @@ void LocalRxBase::dtmfDigitActivated(char digit)
 void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 {
   //printf("DTMF digit %c deactivated. Duration = %d ms\n", digit, duration_ms);
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     dtmfDigitDetected(digit, duration_ms);
   }
@@ -851,7 +857,7 @@ void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 
 void LocalRxBase::onToneDetected(float fq)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     toneDetected(fq);
   }
@@ -873,7 +879,7 @@ void LocalRxBase::dataFrameReceived(vector<uint8_t> frame)
          << " cmd=" << Tx::DATA_CMD_TONE_DETECTED
          << " fq=" << fq
          << endl;
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       toneDetected(fq);
     }
@@ -900,7 +906,7 @@ void LocalRxBase::audioStreamStateChange(bool is_active, bool is_idle)
 
 void LocalRxBase::onSquelchOpen(bool is_open)
 {
-  if (mute_state == MUTE_ALL || mute_rx)
+  if (muteState() == MUTE_ALL)
   {
     return;
   }
@@ -912,7 +918,7 @@ void LocalRxBase::onSquelchOpen(bool is_open)
       delay->clear();
     }
     setSquelchState(true, squelch_det->activityInfo());
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       sql_valve->setOpen(true);
     }
@@ -968,7 +974,7 @@ void LocalRxBase::setSqlHangtimeFromSiglev(float siglev)
   {
     squelch_det->enableExtendedHangtime(
         ((siglev < sql_extended_hangtime_thresh) &&
-         (mute_state == MUTE_NONE)));
+         (muteState() == MUTE_NONE)));
   }
 } /* LocalRxBase::setSqlHangtime */
 
