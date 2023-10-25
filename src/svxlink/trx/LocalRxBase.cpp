@@ -10,7 +10,7 @@ the SvxLink core is running. It can also be a DDR (Digital Drop Receiver).
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2021 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -136,7 +136,7 @@ class PeakMeter : public AudioPassthrough
       if (i < ret)
       {
       	cout << name
-	     << ": Distorsion detected! Please lower the input volume!\n";
+	     << ": Distortion detected! Please lower the input volume!\n";
       }
       
       return ret;
@@ -232,7 +232,7 @@ namespace {
  ****************************************************************************/
 
 LocalRxBase::LocalRxBase(Config &cfg, const std::string& name)
-  : Rx(cfg, name), mute_state(MUTE_ALL),
+  : Rx(cfg, name),
     squelch_det(0), siglevdet(0), /* siglev_offset(0.0), siglev_slope(1.0), */
     tone_dets(0), sql_valve(0), delay(0), sql_tail_elim(0),
     preamp_gain(0), mute_valve(0), sql_hangtime(0), sql_extended_hangtime(0),
@@ -395,7 +395,7 @@ bool LocalRxBase::initialize(void)
   }
   
     // Create a splitter to distribute full bandwidth audio to all consumers
-  AudioSplitter *fullband_splitter = new AudioSplitter;
+  fullband_splitter = new AudioSplitter;
   prev_src->registerSink(fullband_splitter, true);
   prev_src = fullband_splitter;
 
@@ -437,6 +437,7 @@ bool LocalRxBase::initialize(void)
                          sql_extended_hangtime_thresh);
 
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
+  squelch_det->toneDetected.connect(mem_fun(*this, &LocalRxBase::onToneDetected));
   fullband_splitter->addSink(squelch_det, true);
 
   squelchOpen.connect(
@@ -522,6 +523,7 @@ bool LocalRxBase::initialize(void)
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
 
+
 //Änderung RX VoiceBandFilter nach DL1JAE ++++++++++++++++++++++++++++++++++
 string filterdesc;
 if (cfg().getValue(name(),"RX_AUDIO_FILTER",filterdesc))
@@ -541,6 +543,7 @@ else
   prev_src = voiceband_filter;
 }
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
@@ -621,15 +624,13 @@ else
   {
     AudioCompressor *limit = new AudioCompressor;
     limit->setThreshold(limiter_thresh);
-    limit->setRatio(0.05);
-    limit->setAttack(0.1);
-    limit->setDecay(50);
+    limit->setRatio(0.1);
+    limit->setAttack(2);
+    limit->setDecay(20);
     limit->setOutputGain(1);
     prev_src->registerSink(limit, true);
     prev_src = limit;
   }
-  else
-  {
 
     // Clip audio to limit its amplitude
   AudioClipper *clipper = new AudioClipper;
@@ -645,7 +646,7 @@ else
 #endif
   prev_src->registerSink(splatter_filter, true);
   prev_src = splatter_filter;
-  }
+  
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
   setHandler(prev_src);
@@ -678,6 +679,8 @@ else
 
 void LocalRxBase::setMuteState(MuteState new_mute_state)
 {
+  auto mute_state = muteState();
+
   //std::cout << "### LocalRxBase::setMuteState[" << name()
   //          << "]: new_mute_state=" << new_mute_state
   //          << " mute_state=" << mute_state
@@ -706,7 +709,8 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
           {
             audioClose();
           }
-          //squelch_det->reset();
+          squelch_det->reset();
+          siglevdet->reset();
           setSquelchState(false, "MUTED");
           break;
 
@@ -720,15 +724,17 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       switch (mute_state)
       {
         case MUTE_CONTENT:  // MUTE_ALL -> MUTE_CONTENT
+          mute_valve->setOpen(true);
           if (!audioOpen())
           {
+            Rx::setMuteState(MUTE_ALL);
             return;
           }
           squelch_det->restart();
           break;
 
         case MUTE_NONE:   // MUTE_CONTENT -> MUTE_NONE
-          mute_valve->setOpen(true);
+          //mute_valve->setOpen(true);
           if (squelchIsOpen())
           {
             sql_valve->setOpen(true);
@@ -740,6 +746,7 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       }
     }
   }
+  Rx::setMuteState(mute_state);
 } /* LocalRxBase::setMuteState */
 
 
@@ -748,9 +755,11 @@ bool LocalRxBase::addToneDetector(float fq, int bw, float thresh,
 {
   //printf("Adding tone detector with fq=%d  bw=%d  req_dur=%d\n",
   //    	 fq, bw, required_duration);
-  ToneDetector *det = new ToneDetector(fq, bw, required_duration);
+  ToneDetector *det = new ToneDetector(fq, 2*bw, required_duration);
   assert(det != 0);
   det->setPeakThresh(thresh);
+  det->setDetectOverlapPercent(75);
+  det->setDetectToneFrequencyTolerancePercent(50.0f * bw / fq);
   det->detected.connect(sigc::mem_fun(*this, &LocalRxBase::onToneDetected));
   
   tone_dets->addSink(det, true);
@@ -787,6 +796,17 @@ void LocalRxBase::reset(void)
 } /* LocalRxBase::reset */
 
 
+void LocalRxBase::registerFullbandSink(Async::AudioSink* sink)
+{
+  fullband_splitter->addSink(sink);
+} /* LocalRxBase::registerFullbandSink */
+
+
+void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
+{
+  fullband_splitter->removeSink(sink);
+} /* LocalRxBase::unregisterFullbandSink */
+
 
 /****************************************************************************
  *
@@ -804,7 +824,7 @@ void LocalRxBase::reset(void)
 
 void LocalRxBase::sel5Detected(std::string sequence)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     selcallSequenceDetected(sequence);
   }
@@ -824,7 +844,7 @@ void LocalRxBase::dtmfDigitActivated(char digit)
 void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 {
   //printf("DTMF digit %c deactivated. Duration = %d ms\n", digit, duration_ms);
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     dtmfDigitDetected(digit, duration_ms);
   }
@@ -837,7 +857,7 @@ void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 
 void LocalRxBase::onToneDetected(float fq)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     toneDetected(fq);
   }
@@ -859,7 +879,7 @@ void LocalRxBase::dataFrameReceived(vector<uint8_t> frame)
          << " cmd=" << Tx::DATA_CMD_TONE_DETECTED
          << " fq=" << fq
          << endl;
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       toneDetected(fq);
     }
@@ -886,7 +906,7 @@ void LocalRxBase::audioStreamStateChange(bool is_active, bool is_idle)
 
 void LocalRxBase::onSquelchOpen(bool is_open)
 {
-  if (mute_state == MUTE_ALL)
+  if (muteState() == MUTE_ALL)
   {
     return;
   }
@@ -898,7 +918,7 @@ void LocalRxBase::onSquelchOpen(bool is_open)
       delay->clear();
     }
     setSquelchState(true, squelch_det->activityInfo());
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       sql_valve->setOpen(true);
     }
@@ -954,7 +974,7 @@ void LocalRxBase::setSqlHangtimeFromSiglev(float siglev)
   {
     squelch_det->enableExtendedHangtime(
         ((siglev < sql_extended_hangtime_thresh) &&
-         (mute_state == MUTE_NONE)));
+         (muteState() == MUTE_NONE)));
   }
 } /* LocalRxBase::setSqlHangtime */
 
