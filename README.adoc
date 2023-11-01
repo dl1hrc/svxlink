@@ -12,9 +12,10 @@ https://github.com/dl1hrc/SvxLink-Contributions
 
 Für ein update der svxlink Software der Repeater im Sachsenlink:
 
-git pull
-cd /build
-make
+<br>git pull
+<br<cd /build
+<br>make
+
 sudo make install
 
 Für die Ansage der einzelnen Repeater bitte hier nachschauen
