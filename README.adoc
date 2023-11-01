@@ -4,9 +4,21 @@ SvxLink
 image:https://travis-ci.org/sm0svx/svxlink.svg?branch=master["Build Status", link="https://travis-ci.org/sm0svx/svxlink"]
 image:https://badges.gitter.im/Join%20Chat.svg[link="https://gitter.im/sm0svx/svxlink?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge"]
 
+Fork der aktuellen Version von svxlink bei DL1HRC - Adi mit Änderungen in der Filter section. Diese Änderungen basieren auf der Entwicklertätigkeit von DL1JAE - Uwe und sind derzeitig noch nicht im MAIN bei svxlink eingearbeitet.
+
+Eine aktuelle Beschreibung vom svxlink mit vielen Branches steht bei Adi im git-hub zur Verfügung:
+
+https://github.com/dl1hrc/SvxLink-Contributions
+
 Für ein update der svxlink Software der Repeater im Sachsenlink:
 
 git pull
 cd /build
 make
 sudo make install
+
+Für die Ansage der einzelnen Repeater bitte hier nachschauen
+
+https://github.com/DB6KT/SachsLinkContrib
+
+73 de Thomas
