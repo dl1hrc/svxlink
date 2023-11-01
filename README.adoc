@@ -8,7 +8,7 @@ Fork der aktuellen Version von svxlink bei DL1HRC - Adi mit Änderungen in der F
 
 Eine aktuelle Beschreibung vom svxlink mit vielen Branches steht bei Adi im git-hub zur Verfügung:
 
-https://github.com/dl1hrc/SvxLink-Contributions
+https://github.com/dl1hrc/documentation
 
 Für ein update der svxlink Software der Repeater im Sachsenlink:
 
