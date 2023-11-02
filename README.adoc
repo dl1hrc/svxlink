@@ -10,15 +10,48 @@ Eine aktuelle Beschreibung vom svxlink mit vielen Branches steht bei Adi im git-
 
 https://github.com/dl1hrc/documentation
 
-Für ein update der svxlink Software der Repeater im Sachsenlink:
+Zur Verarbeitung wechselt ihr am besten nach /home/svxlink und clont diese repo mit
 
-git pull
+git clone https://github.com/DB6KT/svxlink.git
 
-cd /build
+beim ersten clonen wechselt ihr in das Verzeichnis svxlink und erstellt das build-Verzeichnis
+
+cd svxlink/src
+
+mkdir build
+
+cd build
+
+Starten von cmake wie folgt:
+
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DWITH_SYSTEMD=ON -DCMAKE_BUILD_TYPE=Release ..
+
+weiter mit:
 
 make
 
 sudo make install
+
+fertig!
+
+Für ein späteres update der svxlink Software im Sachsenlink unter /home/svxlink
+
+git pull
+
+cd /src/build
+
+Für den Fall, dass das build-Verzeichnis schon von früheren Installationsversuchen existieren
+sollte und nicht leer ist empfiehlt sich zunächst ein:
+
+make clean
+
+und dann weiter mit
+
+make
+
+sudo make install
+
+
 
 Für die Ansage der einzelnen Repeater bitte hier nachschauen
 
