@@ -524,7 +524,8 @@ bool LocalRxBase::initialize(void)
     // for example CTCSS.
 
 
-//Änderung RX VoiceBandFilter nach DL1JAE ++++++++++++++++++++++++++++++++++
+    //Änderung RX VoiceBandFilter nach DL1JAE ----------------------------------------
+	
 string filterdesc;
 if (cfg().getValue(name(),"RX_AUDIO_FILTER",filterdesc))
 {
@@ -542,8 +543,7 @@ else
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
 }
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
+	//Ende Anpassung Filter--------------------------------------------------
 
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
