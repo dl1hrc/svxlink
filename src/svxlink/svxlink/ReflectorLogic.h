@@ -274,6 +274,7 @@ class ReflectorLogic : public LogicBase
     void handleMsgTalkerStart(std::istream& is);
     void handleMsgTalkerStop(std::istream& is);
     void handleMsgRequestQsy(std::istream& is);
+    void handleMsgStateEvent(std::istream& is);
     void handleMsgAuthOk(void);
     void handleMsgServerInfo(std::istream& is);
     void sendMsg(const ReflectorMsg& msg);

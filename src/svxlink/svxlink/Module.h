@@ -410,10 +410,12 @@ class Module : public sigc::trackable, public Async::AudioSink,
      * The module must be active for this function to do anything.
      */
     void playFile(const std::string& path);
-    
+
     void sendDtmf(const std::string& digits);
-    
-    
+
+    sigc::signal<void, const std::string&, const std::string&> publishStateEvent;
+
+
   protected:
     /**
      * @brief 	Called by the module to activate itself

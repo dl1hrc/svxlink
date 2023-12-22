@@ -295,6 +295,11 @@ If defined a pseudo tty is created. It receives AT commands sent by
 a command line or a program and forward it to the PEI device directly.
 The idea is to have a debug mode to check the response without stopping
 SvxLink.
+.TP
+.B INACTIVE_TIME
+The period of time (in seconds) after which a user is treated as inactive
+if no broadcast nor SDS has been received. The range is between 100
+and 14400 secs.
 .
 .SH AUTHOR
 .

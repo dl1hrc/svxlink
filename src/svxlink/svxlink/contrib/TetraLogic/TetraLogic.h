@@ -360,6 +360,7 @@ class TetraLogic : public Logic
     std::string qos_email_to;
     int qos_limit;
     Async::Timer qosTimer;
+    Async::Timer userRegTimer;
     std::vector<int> rssi_list;
     int min_rssi;
     int max_rssi;
@@ -369,6 +370,7 @@ class TetraLogic : public Logic
     int reg_state;
     std::string vendor;
     std::string model;
+    int inactive_time;
 
     void initPei(void);
     void onCharactersReceived(char *buf, int count);
@@ -425,8 +427,10 @@ class TetraLogic : public Logic
     void handleModel(std::string m_message);
     void handleVendor(std::string m_message);
     void sendSystemInfo(void);
-    std::string jsonToString(Json::Value eventmessage);
+    void userRegTimeout(Async::Timer *timer);
+    void checkUserReg(void);
     void registerUser(std::string tsi);
+    std::string jsonToString(Json::Value eventmessage);
 };  /* class TetraLogic */
 
 

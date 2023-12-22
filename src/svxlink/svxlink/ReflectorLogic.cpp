@@ -619,13 +619,12 @@ void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 void ReflectorLogic::remoteReceivedPublishStateEvent(
     LogicBase *logic, const std::string& event_name, const std::string& data)
 {
-  //cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
-  //     << " logic=" << logic->name()
-  //     << " event_name=" << event_name
-  //     << " data=" << data
-  //     << endl;
+  cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
+       << " logic=" << logic->name()
+       << " event_name=" << event_name
+       << " data=" << data
+       << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
-
   if (event_name == "Voter:sql_state")
   {
     //MsgUdpSignalStrengthValues msg;
@@ -738,17 +737,16 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
     Json::Value user_info;
     is >> user_info;
     user_info["TG"] = m_selected_tg;
-    string ud =jsonToString(user_info);
+    string ud = jsonToString(user_info);
 
-     // cout << "sende: " << event_name << "," << ud << endl;
     MsgStateEvent msg(logic->name(), event_name, ud);
     sendMsg(msg);
   }
   else if (event_name == "Sds:info" || event_name == "DvUsers:info" ||
            event_name == "Rssi:info" || event_name == "System:info" ||
-           event_name == "Qso:info" || event_name == "Register:info")
+           event_name == "Qso:info" || event_name == "Register:info" ||
+           event_name == "ForwardSds:info")
   {
-   // cout << "sende: " << event_name << "," << data << endl;
     MsgStateEvent msg(logic->name(), event_name, data);
     sendMsg(msg);
   }
@@ -900,6 +898,9 @@ void ReflectorLogic::onFrameReceived(FramedTcpConnection *con,
       break;
     case MsgRequestQsy::TYPE:
       handleMsgRequestQsy(ss);
+      break;
+    case MsgStateEvent::TYPE:
+      handleMsgStateEvent(ss);
       break;
     default:
       // Better just ignoring unknown messages for easier addition of protocol
@@ -1224,6 +1225,11 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   std::ostringstream ss;
   ss << "talker_start " << msg.tg() << " " << msg.callsign();
   processEvent(ss.str());
+
+  Json::Value event(Json::objectValue);
+  event["tg"] = msg.tg();
+  event["callsign"] = msg.callsign();
+  publishStateEvent("Reflector:talker_start", jsonToString(event));
 } /* ReflectorLogic::handleMsgTalkerStart */
 
 
@@ -1283,6 +1289,20 @@ void ReflectorLogic::handleMsgRequestQsy(std::istream& is)
     processEvent(os.str());
   }
 } /* ReflectorLogic::handleMsgRequestQsy */
+
+
+void ReflectorLogic::handleMsgStateEvent(std::istream& is)
+{
+  MsgStateEvent msg;
+  if (!msg.unpack(is))
+  {
+    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgStateEvent\n";
+    disconnect();
+    return;
+  }
+
+  publishStateEvent(msg.name(), msg.msg());
+} /* ReflectorLogic::handleMsgStateEvent */
 
 
 void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
@@ -1884,12 +1904,8 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
 string ReflectorLogic::jsonToString(Json::Value eventmessage)
 {
   Json::StreamWriterBuilder builder;
-  std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
-  std::ostringstream ostream;
-  writer->write(eventmessage, &ostream);
-  std::string message = ostream.str();
-  message.erase(std::remove_if(message.begin(), message.end(), 
-                [](unsigned char x){return std::iscntrl(x);}));
+  builder["indentation"] = "";
+  std::string message = Json::writeString(builder, eventmessage);
   return message;
 } /* ReflectorLogic::jsonToString */
 

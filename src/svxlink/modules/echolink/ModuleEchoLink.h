@@ -140,8 +140,8 @@ class ModuleEchoLink : public Module
     ~ModuleEchoLink(void);
     bool initialize(void);
     const char *compiledForVersion(void) const { return SVXLINK_VERSION; }
-
     
+
   protected:
     /**
      * @brief 	Notify the module that the logic core idle state has changed

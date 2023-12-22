@@ -739,6 +739,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     em["source"] = m_callsign;
     em["tg"] = m_current_tg;
     m_reflector->updateQsostate(em);
+    m_reflector->forwardEventState(this, msg.name(), eventmessage, false);
   }
   else if (msg.name() == "Rssi:info")
   {
@@ -756,6 +757,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     em["source"] = m_callsign;
     em["data"] = eventmessage;
     m_reflector->updateRegisterstate(em);
+    m_reflector->forwardEventState(this, msg.name(), eventmessage, true);
   }
   else if (msg.name() == "ForwardSds:info")
   {
