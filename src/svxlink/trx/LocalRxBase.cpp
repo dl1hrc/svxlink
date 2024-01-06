@@ -64,6 +64,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncAudioFsf.h>
 #include <AsyncUdpSocket.h>
 #include <common.h>
+#ifdef LADSPA_VERSION
+#include <AsyncAudioLADSPAPlugin.h>
+#endif
 
 
 /****************************************************************************
@@ -232,7 +235,7 @@ namespace {
  ****************************************************************************/
 
 LocalRxBase::LocalRxBase(Config &cfg, const std::string& name)
-  : Rx(cfg, name), mute_state(MUTE_ALL),
+  : Rx(cfg, name),
     squelch_det(0), siglevdet(0), /* siglev_offset(0.0), siglev_slope(1.0), */
     tone_dets(0), sql_valve(0), delay(0), sql_tail_elim(0),
     preamp_gain(0), mute_valve(0), sql_hangtime(0), sql_extended_hangtime(0),
@@ -266,7 +269,8 @@ bool LocalRxBase::initialize(void)
   
   int delay_line_len = 0;
   bool  mute_1750 = false;
-  if (cfg().getValue(name(), "1750_MUTING", mute_1750))
+  cfg().getValue(name(), "1750_MUTING", mute_1750);
+  if (mute_1750)
   {
     delay_line_len = max(delay_line_len, TONE_1750_MUTING_PRE);
   }
@@ -437,7 +441,7 @@ bool LocalRxBase::initialize(void)
                          sql_extended_hangtime_thresh);
 
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
-  squelch_det->toneDetected.connect(toneDetected.make_slot());
+  squelch_det->toneDetected.connect(mem_fun(*this, &LocalRxBase::onToneDetected));
   fullband_splitter->addSink(squelch_det, true);
 
   squelchOpen.connect(
@@ -597,10 +601,64 @@ bool LocalRxBase::initialize(void)
     // elimination), create it
   if (delay_line_len > 0)
   {
+    std::cout << name() << ": Delay line (for DTMF muting etc) set to "
+              << delay_line_len << " ms" << std::endl;
     delay = new AudioDelayLine(delay_line_len);
     prev_src->registerSink(delay, true);
     prev_src = delay;
   }
+
+#ifdef LADSPA_VERSION
+  std::vector<std::string> ladspa_plugin_cfg;
+  if (cfg().getValue(name(), "LADSPA_PLUGINS", ladspa_plugin_cfg))
+  {
+    for (const auto& pcfg : ladspa_plugin_cfg)
+    {
+      std::istringstream is(pcfg);
+      std::string label;
+      std::getline(is, label, ':');
+      //std::cout << "### pcfg=" << pcfg << "  label=" << label << std::endl;
+      auto plug = new Async::AudioLADSPAPlugin(label);
+      if (!plug->initialize())
+      {
+        std::cout << "*** ERROR: Could not instantiate LADSPA plugin instance "
+                     "with label \"" << label << "\"" << std::endl;
+        return false;
+      }
+      unsigned long portno = 0;
+      LADSPA_Data val;
+      while (is >> val)
+      {
+        while ((portno < plug->portCount()) &&
+               !(plug->portIsControl(portno) && plug->portIsInput(portno)))
+        {
+          ++portno;
+        }
+        if (portno >= plug->portCount())
+        {
+          std::cerr << "*** ERROR: Too many parameters specified for LADSPA "
+                       "plugin \"" << plug->label()
+                    << "\" in configuration variable " << name()
+                    << "/LADSPA_PLUGINS." << std::endl;
+          return false;
+        }
+        plug->setControl(portno++, val);
+        char colon = 0;
+        if ((is >> colon) && (colon != ':'))
+        {
+          std::cerr << "*** ERROR: Illegal format for " << name()
+                    << "/LADSPA_PLUGINS configuration variable" << std::endl;
+          return false;
+        }
+      }
+
+      plug->print(name() + ": ");
+
+      prev_src->registerSink(plug, true);
+      prev_src = plug;
+    }
+  }
+#endif
 
     // Add a limiter to smoothly limit the audio before hard clipping it
   double limiter_thresh = DEFAULT_LIMITER_THRESH;
@@ -634,7 +692,7 @@ bool LocalRxBase::initialize(void)
   
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
-  setHandler(prev_src);
+  setAudioSourceHandler(prev_src);
   
   cfg().getValue(name(), "AUDIO_DEV_KEEP_OPEN", audio_dev_keep_open);
 
@@ -664,6 +722,8 @@ bool LocalRxBase::initialize(void)
 
 void LocalRxBase::setMuteState(MuteState new_mute_state)
 {
+  auto mute_state = muteState();
+
   //std::cout << "### LocalRxBase::setMuteState[" << name()
   //          << "]: new_mute_state=" << new_mute_state
   //          << " mute_state=" << mute_state
@@ -692,7 +752,8 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
           {
             audioClose();
           }
-          //squelch_det->reset();
+          squelch_det->reset();
+          siglevdet->reset();
           setSquelchState(false, "MUTED");
           break;
 
@@ -706,15 +767,17 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       switch (mute_state)
       {
         case MUTE_CONTENT:  // MUTE_ALL -> MUTE_CONTENT
+          mute_valve->setOpen(true);
           if (!audioOpen())
           {
+            Rx::setMuteState(MUTE_ALL);
             return;
           }
           squelch_det->restart();
           break;
 
         case MUTE_NONE:   // MUTE_CONTENT -> MUTE_NONE
-          mute_valve->setOpen(true);
+          //mute_valve->setOpen(true);
           if (squelchIsOpen())
           {
             sql_valve->setOpen(true);
@@ -726,6 +789,7 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       }
     }
   }
+  Rx::setMuteState(mute_state);
 } /* LocalRxBase::setMuteState */
 
 
@@ -803,7 +867,7 @@ void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
 
 void LocalRxBase::sel5Detected(std::string sequence)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     selcallSequenceDetected(sequence);
   }
@@ -823,7 +887,7 @@ void LocalRxBase::dtmfDigitActivated(char digit)
 void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 {
   //printf("DTMF digit %c deactivated. Duration = %d ms\n", digit, duration_ms);
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     dtmfDigitDetected(digit, duration_ms);
   }
@@ -836,7 +900,7 @@ void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 
 void LocalRxBase::onToneDetected(float fq)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     toneDetected(fq);
   }
@@ -858,7 +922,7 @@ void LocalRxBase::dataFrameReceived(vector<uint8_t> frame)
          << " cmd=" << Tx::DATA_CMD_TONE_DETECTED
          << " fq=" << fq
          << endl;
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       toneDetected(fq);
     }
@@ -885,7 +949,7 @@ void LocalRxBase::audioStreamStateChange(bool is_active, bool is_idle)
 
 void LocalRxBase::onSquelchOpen(bool is_open)
 {
-  if (mute_state == MUTE_ALL)
+  if (muteState() == MUTE_ALL)
   {
     return;
   }
@@ -897,7 +961,7 @@ void LocalRxBase::onSquelchOpen(bool is_open)
       delay->clear();
     }
     setSquelchState(true, squelch_det->activityInfo());
-    if (mute_state == MUTE_NONE)
+    if (muteState() == MUTE_NONE)
     {
       sql_valve->setOpen(true);
     }
@@ -953,7 +1017,7 @@ void LocalRxBase::setSqlHangtimeFromSiglev(float siglev)
   {
     squelch_det->enableExtendedHangtime(
         ((siglev < sql_extended_hangtime_thresh) &&
-         (mute_state == MUTE_NONE)));
+         (muteState() == MUTE_NONE)));
   }
 } /* LocalRxBase::setSqlHangtime */
 

@@ -252,6 +252,39 @@
 * Now possible to set the jitter buffer delay on TX audio in RemoteTrx. This
   may be useful if experiencing choppy TX audio.
 
+* Bugfix: Receiver voter muting had a couple of bugs that showed up when using
+  the voter command PTY to disable/mute/enable receivers. It's unknown if
+  these bugs have also caused any other problems.
+
+* 1750 Hz tone burst detector accuracy requirement increased to +/- 25 Hz.
+
+* Bugfix: When using "open repeater on squelch close", the squelch rx id was
+  not set up before the TCL event handler send_rgr_sound was called directly
+  after repeater open. This caused playing the wrong roger sound.
+
+* Bugfix in ModuleEchoLink: The INCORRECT PASSWORD message was ignored.
+
+* New global TCL function "getVar" than makes it easier to get the value of a
+  variable that may be non-existent. If the variable does not exist a default
+  value is returned instead.
+
+* New configuration variable LOCAL_RGR_SOUND in ModuleEchoLink that is used to
+  enable/disable the playing of a roger beep locally when the remote station
+  stops talking.
+
+* Add support for using the CM108B chip for squelch and PTT.
+  Contributed by DL1HRC.
+
+* New configuration variable TG_SELECT_INHIBIT_TIMEOUT that is used to
+  separately control the TG select inhibit feature.
+
+* Bugfix for the 1750_MUTING configuration variable. Setting it to 0 did not
+  disable the feature. It had to be commented out.
+
+* It's now possible to use LADSPA plugins to shape received audio. Fore more
+  information have a look at the documentation for the LADSPA_PLUGINS
+  configuration variable.
+
 
 
  1.7.0 -- 01 Sep 2019
