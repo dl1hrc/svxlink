@@ -713,29 +713,13 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   }
   else if (msg.name() == "Sds:info")
   {
-    Json::Value em;
-    if (eventmessage.isArray())
-    {
-      em = eventmessage[0];
-    }
-    else
-    {
-      em = eventmessage;
-    }
+    (eventmessage.isArray() ? em = eventmessage[0] : em = eventmessage);
     em["source"] = m_callsign;
     m_reflector->updateSdsdata(em);
   }
   else if (msg.name() == "Qso:info")
   {
-    Json::Value em;
-    if (eventmessage.isArray())
-    {
-      em = eventmessage[0];
-    }
-    else
-    {
-      em = eventmessage;
-    }
+    (eventmessage.isArray() ? em = eventmessage[0] : em = eventmessage);
     em["source"] = m_callsign;
     em["tg"] = m_current_tg;
     m_reflector->updateQsostate(em);
@@ -753,7 +737,6 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   }
   else if (msg.name() == "Register:info")
   {
-    Json::Value em;
     em["source"] = m_callsign;
     em["data"] = eventmessage;
     m_reflector->updateRegisterstate(em);

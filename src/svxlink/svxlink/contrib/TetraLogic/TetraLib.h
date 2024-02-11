@@ -386,10 +386,10 @@ std::string dec2nmea_lat(float latitude)
 {
   char lat[10];
   float degrees;
-  float normalizedLat = std::fmod(latitude, 180.0f);
-  float fractpart = std::modf(std::abs(normalizedLat), &degrees);
+  // float normalizedLat = std::fmod(latitude, 180.0f);
+  float fractpart = std::modf(std::abs(latitude), &degrees);
   float minute = fractpart * 60.0;
-  char dir = normalizedLat > 0.0 ? 'N' : 'S';
+  char dir = latitude > 0.0 ? 'N' : 'S';
   sprintf(lat, "%02.0f%05.2f%c", degrees, minute, dir);
   return std::string(lat);;
 } /* dec2nmea_lat */
@@ -399,13 +399,14 @@ std::string dec2nmea_lon(float longitude)
 {
   char lon[10];
   float degrees;
-  float normalizedLon = std::fmod(longitude, 360.0f);
-  float fractpart = std::modf(std::abs(normalizedLon), &degrees);
+  // float normalizedLon = std::fmod(longitude, 360.0f);
+  float fractpart = std::modf(std::abs(longitude), &degrees);
   float minute = fractpart * 60.0;
-  char dir = normalizedLon > 0.0 ? 'E' : 'W';
+  char dir = longitude > 0.0 ? 'E' : 'W';
   sprintf(lon, "%03.0f%05.2f%c", degrees, minute, dir);
   return std::string(lon);
 } /* dec2nmea_lon */
+
 
 
 bool handle_LIP_compact(std::string lip, float & lat, float & lon)
@@ -471,6 +472,7 @@ void handleLipSds(std::string in, LipInfo &lipinfo)
      length of 21 chars corresponds to the specified bit length of 84 bits.
 
      0A0BA7D5B95BC50AFFE16 - from N5UWU (Sepura SEG3900 and STP9240)
+     0A00893E12472C51026810 - from DL1HRC (MTP850) location Bad Dürrenberg
   */
   if (in.substr(0,2) == "0A") // LIP
   {
@@ -518,7 +520,9 @@ void handleLipSds(std::string in, LipInfo &lipinfo)
     {
       lipinfo.latitude = tla * 360.0 / 33554432;
     }
-
+    lipinfo.latitude = std::fmod(lipinfo.latitude, 180.0f); // normalize the latitude
+    lipinfo.longitude = std::fmod(lipinfo.longitude, 360.0f); // normalize the longitude
+    
     // position error in meter
     lipinfo.positionerror = 2*pow(10,(std::stoi(in.substr(15,1),nullptr,16) & 0x03));
 

@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "21122023"
+#define TETRA_LOGIC_VERSION "11022024"
 
 /****************************************************************************
  *
@@ -751,21 +751,25 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
        << ">>> Adi/DL1HRC <dl1hrc@gmx.de> or use the groups.io mailing list"
        << endl;
 
-// std::string mysds;
-// createSDS(mysds, "2620055", "Das ist ein Test vom lieben Adi.");
-// cout << "SDS:" << mysds;
+  // std::string mysds;
+  // createSDS(mysds, "2620055", "Das ist ein Test vom lieben Adi.");
+  // cout << "SDS:" << mysds;
 
   // Test/Debug entries for bug detection, normally comment out
-  /*std::string sds = "0A0BA7D5B95BC50AFFE16";
-  LipInfo li;
-  handleLipSds(sds, li);
-  cout << "Lipinfo from Carsten: " << sds << endl;
-  cout << "Result, lat=" << dec2nmea_lat(li.latitude) << ", lon="
-       << dec2nmea_lon(li.longitude) << ", pos error=" << li.positionerror
-       << ", horizontalvel=" << li.horizontalvelocity << ", directionoftravel="
-       << li.directionoftravel << ", reasonforsending="
-       << li.reasonforsending << endl;
-  */
+  // std::string sds = "0A0BA7D5B95BC50AFFE160";
+  // std::string sds = "0A00893E12472C51026810"; // DL1HRC
+  // std::string sds = "0A112853A9FF4D4FFFE810";
+  // std::string sds = "0A06D0103EC61871000810"; // VK
+  // LipInfo li;
+  // handleLipSds(sds, li);
+ /* cout << "Lipinfo: " << sds << endl;
+    cout << "Result, lat=" << dec2nmea_lat(li.latitude) << ", lon="
+         << dec2nmea_lon(li.longitude) << ", pos error=" << li.positionerror
+         << ", horizontalvel=" << li.horizontalvelocity << ", directionoftravel="
+         << li.directionoftravel << ", reasonforsending="
+         << li.reasonforsending << endl;
+    cout << "Latitude=" << li.latitude << ", longitude=" << li.longitude << endl;
+ */
   return isok;
 
 } /* TetraLogic::initialize */
@@ -2262,7 +2266,8 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
   else if (event_name == "Qso:info")
   {
     // toDo
-    Json::Value t_msg = user_arr[0];
+    Json::Value t_msg;
+    (user_arr.isArray() ? t_msg = user_arr[0] : t_msg = user_arr);
     stringstream ss;
     ss << "Got message:" << t_msg.get("name", "").asString() << ","
        << t_msg.get("comment", "").asString() << ","
