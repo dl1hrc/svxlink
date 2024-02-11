@@ -320,7 +320,6 @@ class Logic : public LogicBase
     void detectedTone(float fq);
     void cfgUpdated(const std::string& section, const std::string& tag);
     void talkerInfo(const std::string &event_name, const std::string &msg);
-
 };  /* class Logic */
 
 

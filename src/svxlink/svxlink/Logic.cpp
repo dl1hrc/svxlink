@@ -1842,7 +1842,6 @@ void Logic::talkerInfo(const std::string &event_name, const std::string &msg)
 {
   publishStateEvent(event_name, msg);
 } /* Logic::talkerInfo */
-  
 
 
 /*
