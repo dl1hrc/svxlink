@@ -1,4 +1,4 @@
- 1.7.0 -- ?? ??? ????
+ 1.7.0 -- 25 Feb 2024
 ----------------------
 
 * ASYNC_AUDIO_ALSA_ZEROFILL is now enabled by default.
@@ -66,6 +66,9 @@
 
 * Bugfix Async::HttpServerConnection: EOL handling failed with newer
   compilers.
+
+* New class Async::AudioLADSPAPlugin which enable the use of LADSPA plugins to
+  process audio.
 
 
 

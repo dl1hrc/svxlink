@@ -1,4 +1,4 @@
- 1.8.0 -- ?? ??? ????
+ 1.8.0 -- 25 Feb 2024
 ----------------------
 
 * MetarInformation, more flexible airport announcement at the beginning of a
@@ -264,7 +264,7 @@
 
 * Bugfix in ModuleEchoLink: The INCORRECT PASSWORD message was ignored.
 
-* New global TCL function "getVar" than makes it easier to get the value of a
+* New global TCL function "getVar" that makes it easier to get the value of a
   variable that may be non-existent. If the variable does not exist a default
   value is returned instead.
 
@@ -277,6 +277,20 @@
 
 * New configuration variable TG_SELECT_INHIBIT_TIMEOUT that is used to
   separately control the TG select inhibit feature.
+
+* Bugfix for the 1750_MUTING configuration variable. Setting it to 0 did not
+  disable the feature. It had to be commented out.
+
+* It's now possible to use LADSPA plugins to shape received audio. Fore more
+  information have a look at the documentation for the LADSPA_PLUGINS
+  configuration variable.
+
+
+
+ 1.7.0-1 -- 10 Mar 2021
+------------------------
+
+* Bugfix in SvxReflector authentication code. Upgrade immediately.
 
 
 
