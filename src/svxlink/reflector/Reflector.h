@@ -233,6 +233,8 @@ class Reflector : public sigc::trackable
      */
     void forwardEventState(ReflectorClient* origin, const std::string& name, Json::Value& message, bool broadcast);
 
+    uint32_t randomQsyLo(void) const { return m_random_qsy_lo; }
+    uint32_t randomQsyHi(void) const { return m_random_qsy_hi; }
 
   private:
     typedef std::map<Async::FramedTcpConnection*,
