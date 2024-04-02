@@ -6,7 +6,7 @@
 
 \verbatim
 SvxReflector - An audio reflector for connecting SvxLink Servers
-Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -73,6 +73,7 @@ namespace Async
 {
   class UdpSocket;
   class Config;
+  class Pty;
 };
 
 class ReflectorMsg;
@@ -281,6 +282,8 @@ class Reflector : public sigc::trackable
     std::map<std::string, Json::Value> systemStateMap;
     std::map<std::string, Json::Value> registerStateMap;
 
+    Async::Pty*    m_cmd_pty;
+
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);
     void clientConnected(Async::FramedTcpConnection *con);
@@ -301,6 +304,8 @@ class Reflector : public sigc::trackable
     void writeUserData(void);
     std::string jsonToString(Json::Value eventmessage);
     void requestNodeInfos(void);
+    void ctrlPtyDataReceived(const void *buf, size_t count);
+    void cfgUpdated(const std::string& section, const std::string& tag);
 
 };  /* class Reflector */
 
