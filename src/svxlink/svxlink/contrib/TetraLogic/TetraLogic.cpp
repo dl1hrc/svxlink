@@ -2272,7 +2272,7 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
     ss << "Got message:" << t_msg.get("name", "").asString() << ","
        << t_msg.get("comment", "").asString() << ","
        << t_msg.get("idtype", "").asString() << ","
-       << t_msg.get("tsi", 0).asInt();
+       << t_msg.get("tsi", "").asString();
     log(LOGTRACE, "TetraLogic::onPublishStateEvent: " + ss.str());
   }
 } /* TetraLogic::onPublishStateEvent */
