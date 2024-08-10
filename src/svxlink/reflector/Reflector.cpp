@@ -52,6 +52,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncEncryptedUdpSocket.h>
 #include <AsyncApplication.h>
 #include <AsyncPty.h>
+
 #include <common.h>
 #include <config.h>
 
@@ -491,7 +492,14 @@ bool Reflector::signClientCert(Async::SslX509& cert)
     return false;
   }
   auto crtfile = m_certs_dir + "/" + cn + ".crt";
-  if (!cert.writePemFile(crtfile) || !m_issue_ca_cert.appendPemFile(crtfile))
+  if (cert.writePemFile(crtfile) && m_issue_ca_cert.appendPemFile(crtfile))
+  {
+    runCAHook({
+        { "CA_OP",      "CSR_SIGNED" },
+        { "CA_CRT_PEM", cert.pem() }
+      });
+  }
+  else
   {
     std::cerr << "*** WARNING: Failed to write client certificate file '"
               << crtfile << "'" << std::endl;
@@ -597,6 +605,126 @@ std::string Reflector::issuingCertPem(void) const
 } /* Reflector::issuingCertPem */
 
 
+bool Reflector::callsignOk(const std::string& callsign) const
+{
+    // Empty check
+  if (callsign.empty())
+  {
+    std::cout << "*** WARNING: The callsign is empty" << std::endl;
+    return false;
+  }
+
+    // Accept check
+  std::string accept_cs_re_str;
+  if (!m_cfg->getValue("GLOBAL", "ACCEPT_CALLSIGN", accept_cs_re_str) ||
+      accept_cs_re_str.empty())
+  {
+    accept_cs_re_str =
+      "[A-Z0-9][A-Z]{0,2}\\d[A-Z0-9]{1,3}[A-Z](?:-[A-Z0-9]{1,3})?";
+  }
+  const std::regex accept_callsign_re(accept_cs_re_str);
+  if (!std::regex_match(callsign, accept_callsign_re))
+  {
+    std::cerr << "*** WARNING: The callsign '" << callsign
+              << "' is not accepted by configuration (ACCEPT_CALLSIGN)"
+              << std::endl;
+    return false;
+  }
+
+    // Reject check
+  std::string reject_cs_re_str;
+  m_cfg->getValue("GLOBAL", "REJECT_CALLSIGN", reject_cs_re_str);
+  if (!reject_cs_re_str.empty())
+  {
+    const std::regex reject_callsign_re(reject_cs_re_str);
+    if (std::regex_match(callsign, reject_callsign_re))
+    {
+      std::cerr << "*** WARNING: The callsign '" << callsign
+                << "' has been rejected by configuration (REJECT_CALLSIGN)."
+                << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+} /* Reflector::callsignOk */
+
+
+Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
+{
+  if (req.isNull())
+  {
+    return nullptr;
+  }
+
+  std::string callsign(req.commonName());
+  if (!callsignOk(callsign))
+  {
+    std::cerr << "*** WARNING: The CSR CN (callsign) check failed"
+              << std::endl;
+    return nullptr;
+  }
+
+  std::string csr_path(m_csrs_dir + "/" + callsign + ".csr");
+  Async::SslCertSigningReq csr;
+  if (!csr.readPemFile(csr_path))
+  {
+    csr.set(nullptr);
+  }
+
+  if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
+  {
+    std::cerr << "*** WARNING: The received CSR with callsign '"
+              << callsign << "' has a different public key "
+                 "than the current CSR. That may be a sign of someone "
+                 "trying to hijack a callsign or the owner of the "
+                 "callsign has generated a new private/public key pair."
+              << std::endl;
+    return nullptr;
+  }
+
+  std::string crtfile(m_certs_dir + "/" + callsign + ".crt");
+  Async::SslX509 cert;
+  if (!cert.readPemFile(crtfile) || !cert.verify(m_issue_ca_pkey) ||
+      !cert.timeIsWithinRange() || (cert.publicKey() != req.publicKey()))
+  {
+    cert.set(nullptr);
+  }
+
+  const std::string pending_csr_path(
+      m_pending_csrs_dir + "/" + callsign + ".csr");
+  Async::SslCertSigningReq pending_csr;
+  if ((
+        csr.isNull() ||
+        (req.digest() != csr.digest()) ||
+        cert.isNull()
+      ) && (
+        !pending_csr.readPemFile(pending_csr_path) ||
+        (req.digest() != pending_csr.digest())
+      ))
+  {
+    std::cout << callsign << ": Add pending CSR '" << pending_csr_path
+              << "' to CA" << std::endl;
+    if (req.writePemFile(pending_csr_path))
+    {
+      const auto ca_op =
+        pending_csr.isNull() ? "PENDING_CSR_CREATE" : "PENDING_CSR_UPDATE";
+      runCAHook({
+          { "CA_OP",      ca_op },
+          { "CA_CSR_PEM", req.pem() }
+        });
+    }
+    else
+    {
+      std::cerr << "*** WARNING: Could not write CSR file '"
+                << pending_csr_path << "'" << std::endl;
+    }
+  }
+
+  return cert;
+} /* Reflector::csrReceived */
+
+
 /****************************************************************************
  *
  * Protected member functions
@@ -617,8 +745,6 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
        << ": Client connected" << endl;
   ReflectorClient *client = new ReflectorClient(this, con, m_cfg);
   con->verifyPeer.connect(sigc::mem_fun(*this, &Reflector::onVerifyPeer));
-  client->csrReceived.connect(
-      sigc::mem_fun(*this, &Reflector::onCsrReceived));
   m_client_con_map[con] = client;
 } /* Reflector::clientConnected */
 
@@ -1323,7 +1449,7 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
       auto cert = signClientCsr(cn);
       if (!cert.isNull())
       {
-        std::cout << "------------- Client Certificate --------------"
+        std::cout << "---------- Signed Client Certificate ----------"
                   << std::endl;
         cert.print(" ");
         std::cout << "-----------------------------------------------"
@@ -1908,7 +2034,7 @@ bool Reflector::loadSigningCAFiles(void)
       csr.addSubjectName("C", value);
     }
     Async::SslX509Extensions exts;
-    exts.addBasicConstraints("critical, CA:TRUE");
+    exts.addBasicConstraints("critical, CA:TRUE, pathlen:0");
     exts.addKeyUsage("critical, cRLSign, digitalSignature, keyCertSign");
     if (m_cfg->getValue("ISSUING_CA", "EMAIL_ADDRESS", value) &&
         !value.empty())
@@ -1968,104 +2094,13 @@ bool Reflector::onVerifyPeer(TcpConnection *con, bool preverify_ok,
   {
     std::cout << "*** ERROR: Certificate verification failed for client"
               << std::endl;
-    std::cout << "------------- Peer Certificate --------------" << std::endl;
+    std::cout << "------------ Client Certificate -------------" << std::endl;
     cert.print();
     std::cout << "---------------------------------------------" << std::endl;
   }
 
   return preverify_ok;
 } /* Reflector::onVerifyPeer */
-
-
-Async::SslX509 Reflector::onCsrReceived(Async::SslCertSigningReq& req)
-{
-  if (req.isNull())
-  {
-    return nullptr;
-  }
-
-  std::string callsign(req.commonName());
-  if (callsign.empty())
-  {
-    std::cout << "*** WARNING: The callsign (CN) in the CSR is empty. "
-                 "Ignoring this CSR." << std::endl;
-    return nullptr;
-  }
-    // FIXME: Move code to initialize() and make a public function
-    // verifyCallsign() so that callsigns can be verified from
-    // ReflectorClient.
-  std::string csrestr;
-  if (!m_cfg->getValue("GLOBAL", "CALLSIGN_MATCH", csrestr) ||
-      csrestr.empty())
-  {
-    csrestr = "[A-Z0-9][A-Z]{0,2}\\d[A-Z0-9]{1,3}[A-Z](?:-[A-Z0-9]{1,3})?";
-  }
-  const std::regex csre(csrestr);
-  if (!std::regex_match(callsign, csre))
-  {
-    std::cout << "*** WARNING: The callsign (CN) in the received CSR, '"
-              << callsign << "', is malformed." << std::endl;
-    return nullptr;
-  }
-
-  std::string csr_path(m_csrs_dir + "/" + callsign + ".csr");
-  Async::SslCertSigningReq csr;
-  if (!csr.readPemFile(csr_path))
-  {
-    csr.set(nullptr);
-  }
-
-  if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
-  {
-    std::cerr << "*** WARNING: The received CSR with callsign '"
-              << callsign << "' has a different public key "
-                 "than the current CSR. That may be a sign of someone "
-                 "trying to highjack a callsign or the owner of the "
-                 "callsign has generated a new private/public key pair."
-              << std::endl;
-    return nullptr;
-  }
-
-  std::string crtfile(m_certs_dir + "/" + callsign + ".crt");
-  Async::SslX509 cert;
-  if (!cert.readPemFile(crtfile) || !cert.verify(m_issue_ca_pkey) ||
-      !cert.timeIsWithinRange() || (cert.publicKey() != req.publicKey()))
-  {
-    cert.set(nullptr);
-  }
-
-  std::string pending_csr_path(m_pending_csrs_dir + "/" + callsign + ".csr");
-  Async::SslCertSigningReq pending_csr;
-  if (!pending_csr.readPemFile(pending_csr_path))
-  {
-    pending_csr.set(nullptr);
-  }
-
-  if ((
-        csr.isNull() ||
-        (req.digest() != csr.digest()) ||
-        cert.isNull()
-      ) && (
-        !pending_csr.readPemFile(pending_csr_path) ||
-        (req.digest() != pending_csr.digest())
-      ))
-  {
-    std::cout << callsign << ": Add pending CSR '" << pending_csr_path
-              << "' to CA" << std::endl;
-    if (!req.writePemFile(pending_csr_path))
-    {
-      std::cerr << "*** WARNING: Could not write CSR file '"
-                << pending_csr_path << "'" << std::endl;
-    }
-  }
-  else
-  {
-    std::cout << callsign << ": The new CSR is the same as the already "
-              << "existing CSR, so ignoring the new one" << std::endl;
-  }
-
-  return cert;
-} /* Reflector::onCsrReceived */
 
 
 bool Reflector::buildPath(const std::string& sec,    const std::string& tag,
@@ -2104,6 +2139,46 @@ bool Reflector::removeClientCert(const std::string& cn)
   std::cout << "### Reflector::removeClientCert: cn=" << cn << std::endl;
   return true;
 } /* Reflector::removeClientCert */
+
+
+void Reflector::runCAHook(const Async::Exec::Environment& env)
+{
+  auto ca_hook_cmd = m_cfg->getValue("GLOBAL", "CERT_CA_HOOK");
+  if (!ca_hook_cmd.empty())
+  {
+    auto ca_hook = new Async::Exec(ca_hook_cmd);
+    ca_hook->addEnvironmentVars(env);
+    ca_hook->setTimeout(300); // Five minutes timeout
+    ca_hook->stdoutData.connect(
+        [=](const char* buf, int cnt)
+        {
+          std::cout << buf;
+        });
+    ca_hook->stderrData.connect(
+        [=](const char* buf, int cnt)
+        {
+          std::cerr << buf;
+        });
+    ca_hook->exited.connect(
+        [=](void) {
+          if (ca_hook->ifExited())
+          {
+            if (ca_hook->exitStatus() != 0)
+            {
+              std::cerr << "*** ERROR: CA hook exited with exit status "
+                        << ca_hook->exitStatus() << std::endl;
+            }
+          }
+          else if (ca_hook->ifSignaled())
+          {
+            std::cerr << "*** ERROR: CA hook exited with signal "
+                      << ca_hook->termSig() << std::endl;
+          }
+          Async::Application::app().runTask([=]{ delete ca_hook; });
+        });
+    ca_hook->run();
+  }
+} /* Reflector::runCAHook */
 
 
 /*

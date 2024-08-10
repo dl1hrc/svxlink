@@ -147,18 +147,24 @@ svxreflector. The device may be defined as COMMAND_PTY=/dev/shm/reflector_ctrl.
 To change the value of a configuration variable you may send a command to the
 device like this:
 
-  echo "CFG section varname value" > /dev/shm/reflector_ctrl
+  echo CFG section varname value > /dev/shm/reflector_ctrl
   e.g.
-  echo "CFG GLOBAL SQL_TIMEOUT_BLOCKTIME 60" > /dev/shm/reflector_ctrl
+  echo CFG GLOBAL SQL_TIMEOUT_BLOCKTIME 60 > /dev/shm/reflector_ctrl
 
 To sign a client certificate:
 
-  echo "CA SIGN callsign" > /dev/shm/reflector_ctrl
+  echo CA SIGN callsign > /dev/shm/reflector_ctrl
 .TP
-.B CALLSIGN_MATCH
-A regular expression for verifying that the common name in client certificates
-really contain a valid callsign. The default is to roughly match standard ham
-radio callsigns.
+.B ACCEPT_CALLSIGN
+A regular expression for verifying that a received login callsign has the
+correct format. The default is to roughly match standard ham radio callsigns.
+Example: ACCEPT_CALLSIGN="S[A-M]\\d[A-Z]{1,3}(?:-[A-Z0-9]{1,3})?"
+.TP
+.B REJECT_CALLSIGN
+A regular expression for rejecting login callsigns. This can be used to block
+some specific callsigns or even a whole range of callsigns. No callsigns are
+rejected by default.
+Example: REJECT_CALLSIGN="SM0XYZ|SM1ABC|SM2.*"
 .TP
 .B CERT_PKI_DIR
 The path to the directory containing PKI (Public Key Infrastructure) files. If
@@ -191,6 +197,23 @@ The path to the directory containing signed certificate files. If a relative
 path is given, the value of the CERT_PKI_DIR variable will be prepended.
 
 Default: CERT_CA_CERTS_DIR=certs/
+.TP
+.B CERT_CA_HOOK
+Set to a path for an external application that is run on CA events like when a
+CSR is received or when a certificate is signed. The following environment
+variables will be set up before running the external application.
+.RS
+.IP \(bu 4
+.BR "CA_OP" ":"
+Set to one of the strings PENDING_CSR_CREATE, PENDING_CSR_UPDATE or
+CSR_SIGNED, which should be self explanatory.
+.IP \(bu 4
+.BR "CA_CSR_PEM" ":"
+CSR data in PEM format. This is not set for operation CSR_SIGNED.
+.IP \(bu 4
+.BR "CA_CRT_PEM" ":"
+Certificate data in PEM format. This is only set for operation CSR_SIGNED.
+.RE
 .
 .SS ROOT_CA, ISSUING_CA and SERVER_CERT sections
 .
