@@ -52,6 +52,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncEncryptedUdpSocket.h>
 #include <AsyncApplication.h>
 #include <AsyncPty.h>
+
 #include <common.h>
 #include <config.h>
 
@@ -165,7 +166,7 @@ namespace {
   void startCertRenewTimer(const Async::SslX509& cert, Async::AtTimer& timer)
   {
     int days=0, seconds=0;
-    cert.timeSpan(days, seconds);
+    cert.validityTime(days, seconds);
     time_t renew_time = cert.notBefore() +
         (static_cast<time_t>(days)*24*3600 + seconds)*RENEW_AFTER;
     timer.setTimeout(renew_time);
@@ -474,15 +475,13 @@ Reflector::loadClientCsr(const std::string& callsign)
 } /* Reflector::loadClientPendingCsr */
 
 
-bool Reflector::signClientCert(Async::SslX509& cert)
+bool Reflector::signClientCert(Async::SslX509& cert, const std::string& ca_op)
 {
   //std::cout << "### Reflector::signClientCert" << std::endl;
 
   cert.setSerialNumber();
   cert.setIssuerName(m_issue_ca_cert.subjectName());
-  time_t tnow = time(NULL);
-  cert.setNotBefore(tnow);
-  cert.setNotAfter(tnow + CERT_VALIDITY_TIME);
+  cert.setValidityTime(CERT_VALIDITY_DAYS);
   auto cn = cert.commonName();
   if (!cert.sign(m_issue_ca_pkey))
   {
@@ -491,7 +490,14 @@ bool Reflector::signClientCert(Async::SslX509& cert)
     return false;
   }
   auto crtfile = m_certs_dir + "/" + cn + ".crt";
-  if (!cert.writePemFile(crtfile) || !m_issue_ca_cert.appendPemFile(crtfile))
+  if (cert.writePemFile(crtfile) && m_issue_ca_cert.appendPemFile(crtfile))
+  {
+    runCAHook({
+        { "CA_OP",      ca_op },
+        { "CA_CRT_PEM", cert.pem() }
+      });
+  }
+  else
   {
     std::cerr << "*** WARNING: Failed to write client certificate file '"
               << crtfile << "'" << std::endl;
@@ -529,7 +535,7 @@ Async::SslX509 Reflector::signClientCsr(const std::string& cn)
   Async::SslKeypair csr_pkey(req.publicKey());
   cert.setPublicKey(csr_pkey);
 
-  if (!signClientCert(cert))
+  if (!signClientCert(cert, "CSR_SIGNED"))
   {
     cert.set(nullptr);
   }
@@ -597,6 +603,126 @@ std::string Reflector::issuingCertPem(void) const
 } /* Reflector::issuingCertPem */
 
 
+bool Reflector::callsignOk(const std::string& callsign) const
+{
+    // Empty check
+  if (callsign.empty())
+  {
+    std::cout << "*** WARNING: The callsign is empty" << std::endl;
+    return false;
+  }
+
+    // Accept check
+  std::string accept_cs_re_str;
+  if (!m_cfg->getValue("GLOBAL", "ACCEPT_CALLSIGN", accept_cs_re_str) ||
+      accept_cs_re_str.empty())
+  {
+    accept_cs_re_str =
+      "[A-Z0-9][A-Z]{0,2}\\d[A-Z0-9]{1,3}[A-Z](?:-[A-Z0-9]{1,3})?";
+  }
+  const std::regex accept_callsign_re(accept_cs_re_str);
+  if (!std::regex_match(callsign, accept_callsign_re))
+  {
+    std::cerr << "*** WARNING: The callsign '" << callsign
+              << "' is not accepted by configuration (ACCEPT_CALLSIGN)"
+              << std::endl;
+    return false;
+  }
+
+    // Reject check
+  std::string reject_cs_re_str;
+  m_cfg->getValue("GLOBAL", "REJECT_CALLSIGN", reject_cs_re_str);
+  if (!reject_cs_re_str.empty())
+  {
+    const std::regex reject_callsign_re(reject_cs_re_str);
+    if (std::regex_match(callsign, reject_callsign_re))
+    {
+      std::cerr << "*** WARNING: The callsign '" << callsign
+                << "' has been rejected by configuration (REJECT_CALLSIGN)."
+                << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+} /* Reflector::callsignOk */
+
+
+Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
+{
+  if (req.isNull())
+  {
+    return nullptr;
+  }
+
+  std::string callsign(req.commonName());
+  if (!callsignOk(callsign))
+  {
+    std::cerr << "*** WARNING: The CSR CN (callsign) check failed"
+              << std::endl;
+    return nullptr;
+  }
+
+  std::string csr_path(m_csrs_dir + "/" + callsign + ".csr");
+  Async::SslCertSigningReq csr;
+  if (!csr.readPemFile(csr_path))
+  {
+    csr.set(nullptr);
+  }
+
+  if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
+  {
+    std::cerr << "*** WARNING: The received CSR with callsign '"
+              << callsign << "' has a different public key "
+                 "than the current CSR. That may be a sign of someone "
+                 "trying to hijack a callsign or the owner of the "
+                 "callsign has generated a new private/public key pair."
+              << std::endl;
+    return nullptr;
+  }
+
+  std::string crtfile(m_certs_dir + "/" + callsign + ".crt");
+  Async::SslX509 cert;
+  if (!cert.readPemFile(crtfile) || !cert.verify(m_issue_ca_pkey) ||
+      !cert.timeIsWithinRange() || (cert.publicKey() != req.publicKey()))
+  {
+    cert.set(nullptr);
+  }
+
+  const std::string pending_csr_path(
+      m_pending_csrs_dir + "/" + callsign + ".csr");
+  Async::SslCertSigningReq pending_csr;
+  if ((
+        csr.isNull() ||
+        (req.digest() != csr.digest()) ||
+        cert.isNull()
+      ) && (
+        !pending_csr.readPemFile(pending_csr_path) ||
+        (req.digest() != pending_csr.digest())
+      ))
+  {
+    std::cout << callsign << ": Add pending CSR '" << pending_csr_path
+              << "' to CA" << std::endl;
+    if (req.writePemFile(pending_csr_path))
+    {
+      const auto ca_op =
+        pending_csr.isNull() ? "PENDING_CSR_CREATE" : "PENDING_CSR_UPDATE";
+      runCAHook({
+          { "CA_OP",      ca_op },
+          { "CA_CSR_PEM", req.pem() }
+        });
+    }
+    else
+    {
+      std::cerr << "*** WARNING: Could not write CSR file '"
+                << pending_csr_path << "'" << std::endl;
+    }
+  }
+
+  return cert;
+} /* Reflector::csrReceived */
+
+
 /****************************************************************************
  *
  * Protected member functions
@@ -617,8 +743,6 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
        << ": Client connected" << endl;
   ReflectorClient *client = new ReflectorClient(this, con, m_cfg);
   con->verifyPeer.connect(sigc::mem_fun(*this, &Reflector::onVerifyPeer));
-  client->csrReceived.connect(
-      sigc::mem_fun(*this, &Reflector::onCsrReceived));
   m_client_con_map[con] = client;
 } /* Reflector::clientConnected */
 
@@ -1323,7 +1447,7 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
       auto cert = signClientCsr(cn);
       if (!cert.isNull())
       {
-        std::cout << "------------- Client Certificate --------------"
+        std::cout << "---------- Signed Client Certificate ----------"
                   << std::endl;
         cert.print(" ");
         std::cout << "-----------------------------------------------"
@@ -1485,8 +1609,8 @@ bool Reflector::loadCertificateFiles(void)
   }
   ca_dgst.signInit(MsgCABundle::MD_ALG, m_issue_ca_pkey);
   m_ca_sig = ca_dgst.sign(bundle);
-  m_ca_url = "";
-  m_cfg->getValue("GLOBAL", "CERT_CA_URL", m_ca_url);
+  //m_ca_url = "";
+  //m_cfg->getValue("GLOBAL", "CERT_CA_URL", m_ca_url);
 
   return true;
 } /* Reflector::loadCertificateFiles */
@@ -1546,7 +1670,7 @@ bool Reflector::loadServerCertificateFiles(void)
     else
     {
       int days=0, seconds=0;
-      cert.timeSpan(days, seconds);
+      cert.validityTime(days, seconds);
       //std::cout << "### days=" << days << "  seconds=" << seconds
       //          << std::endl;
       time_t tnow = time(NULL);
@@ -1620,9 +1744,7 @@ bool Reflector::loadServerCertificateFiles(void)
     cert.setVersion(Async::SslX509::VERSION_3);
     cert.setIssuerName(m_issue_ca_cert.subjectName());
     cert.setSubjectName(req.subjectName());
-    time_t tnow = time(NULL);
-    cert.setNotBefore(tnow);
-    cert.setNotAfter(tnow + CERT_VALIDITY_TIME);
+    cert.setValidityTime(CERT_VALIDITY_DAYS);
     cert.addExtensions(req.extensions());
     cert.setPublicKey(pkey);
     cert.sign(m_issue_ca_pkey);
@@ -1775,9 +1897,7 @@ bool Reflector::loadRootCAFiles(void)
       ca_exts.addSubjectAltNames("email:" + value);
     }
     m_ca_cert.addExtensions(ca_exts);
-    time_t tnow = time(NULL);
-    m_ca_cert.setNotBefore(tnow);
-    m_ca_cert.setNotAfter(tnow + 25*365*24*3600);
+    m_ca_cert.setValidityTime(ROOT_CA_VALIDITY_DAYS);
     m_ca_cert.setPublicKey(m_ca_pkey);
     m_ca_cert.sign(m_ca_pkey);
     if (!m_ca_cert.writePemFile(ca_crtfile))
@@ -1849,7 +1969,7 @@ bool Reflector::loadSigningCAFiles(void)
     else
     {
       int days=0, seconds=0;
-      m_issue_ca_cert.timeSpan(days, seconds);
+      m_issue_ca_cert.validityTime(days, seconds);
       time_t tnow = time(NULL);
       time_t renew_time = tnow + (days*24*3600 + seconds)*RENEW_AFTER;
       if (!m_issue_ca_cert.timeIsWithinRange(tnow, renew_time))
@@ -1908,7 +2028,7 @@ bool Reflector::loadSigningCAFiles(void)
       csr.addSubjectName("C", value);
     }
     Async::SslX509Extensions exts;
-    exts.addBasicConstraints("critical, CA:TRUE");
+    exts.addBasicConstraints("critical, CA:TRUE, pathlen:0");
     exts.addKeyUsage("critical, cRLSign, digitalSignature, keyCertSign");
     if (m_cfg->getValue("ISSUING_CA", "EMAIL_ADDRESS", value) &&
         !value.empty())
@@ -1932,9 +2052,7 @@ bool Reflector::loadSigningCAFiles(void)
     m_issue_ca_cert.setVersion(Async::SslX509::VERSION_3);
     m_issue_ca_cert.setSubjectName(csr.subjectName());
     m_issue_ca_cert.addExtensions(csr.extensions());
-    time_t tnow = time(NULL);
-    m_issue_ca_cert.setNotBefore(tnow);
-    m_issue_ca_cert.setNotAfter(tnow + 4*CERT_VALIDITY_TIME);
+    m_issue_ca_cert.setValidityTime(ISSUING_CA_VALIDITY_DAYS);
     m_issue_ca_cert.setPublicKey(m_issue_ca_pkey);
     m_issue_ca_cert.setIssuerName(m_ca_cert.subjectName());
     m_issue_ca_cert.sign(m_ca_pkey);
@@ -1968,104 +2086,13 @@ bool Reflector::onVerifyPeer(TcpConnection *con, bool preverify_ok,
   {
     std::cout << "*** ERROR: Certificate verification failed for client"
               << std::endl;
-    std::cout << "------------- Peer Certificate --------------" << std::endl;
+    std::cout << "------------ Client Certificate -------------" << std::endl;
     cert.print();
     std::cout << "---------------------------------------------" << std::endl;
   }
 
   return preverify_ok;
 } /* Reflector::onVerifyPeer */
-
-
-Async::SslX509 Reflector::onCsrReceived(Async::SslCertSigningReq& req)
-{
-  if (req.isNull())
-  {
-    return nullptr;
-  }
-
-  std::string callsign(req.commonName());
-  if (callsign.empty())
-  {
-    std::cout << "*** WARNING: The callsign (CN) in the CSR is empty. "
-                 "Ignoring this CSR." << std::endl;
-    return nullptr;
-  }
-    // FIXME: Move code to initialize() and make a public function
-    // verifyCallsign() so that callsigns can be verified from
-    // ReflectorClient.
-  std::string csrestr;
-  if (!m_cfg->getValue("GLOBAL", "CALLSIGN_MATCH", csrestr) ||
-      csrestr.empty())
-  {
-    csrestr = "[A-Z0-9][A-Z]{0,2}\\d[A-Z0-9]{1,3}[A-Z](?:-[A-Z0-9]{1,3})?";
-  }
-  const std::regex csre(csrestr);
-  if (!std::regex_match(callsign, csre))
-  {
-    std::cout << "*** WARNING: The callsign (CN) in the received CSR, '"
-              << callsign << "', is malformed." << std::endl;
-    return nullptr;
-  }
-
-  std::string csr_path(m_csrs_dir + "/" + callsign + ".csr");
-  Async::SslCertSigningReq csr;
-  if (!csr.readPemFile(csr_path))
-  {
-    csr.set(nullptr);
-  }
-
-  if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
-  {
-    std::cerr << "*** WARNING: The received CSR with callsign '"
-              << callsign << "' has a different public key "
-                 "than the current CSR. That may be a sign of someone "
-                 "trying to highjack a callsign or the owner of the "
-                 "callsign has generated a new private/public key pair."
-              << std::endl;
-    return nullptr;
-  }
-
-  std::string crtfile(m_certs_dir + "/" + callsign + ".crt");
-  Async::SslX509 cert;
-  if (!cert.readPemFile(crtfile) || !cert.verify(m_issue_ca_pkey) ||
-      !cert.timeIsWithinRange() || (cert.publicKey() != req.publicKey()))
-  {
-    cert.set(nullptr);
-  }
-
-  std::string pending_csr_path(m_pending_csrs_dir + "/" + callsign + ".csr");
-  Async::SslCertSigningReq pending_csr;
-  if (!pending_csr.readPemFile(pending_csr_path))
-  {
-    pending_csr.set(nullptr);
-  }
-
-  if ((
-        csr.isNull() ||
-        (req.digest() != csr.digest()) ||
-        cert.isNull()
-      ) && (
-        !pending_csr.readPemFile(pending_csr_path) ||
-        (req.digest() != pending_csr.digest())
-      ))
-  {
-    std::cout << callsign << ": Add pending CSR '" << pending_csr_path
-              << "' to CA" << std::endl;
-    if (!req.writePemFile(pending_csr_path))
-    {
-      std::cerr << "*** WARNING: Could not write CSR file '"
-                << pending_csr_path << "'" << std::endl;
-    }
-  }
-  else
-  {
-    std::cout << callsign << ": The new CSR is the same as the already "
-              << "existing CSR, so ignoring the new one" << std::endl;
-  }
-
-  return cert;
-} /* Reflector::onCsrReceived */
 
 
 bool Reflector::buildPath(const std::string& sec,    const std::string& tag,
@@ -2104,6 +2131,46 @@ bool Reflector::removeClientCert(const std::string& cn)
   std::cout << "### Reflector::removeClientCert: cn=" << cn << std::endl;
   return true;
 } /* Reflector::removeClientCert */
+
+
+void Reflector::runCAHook(const Async::Exec::Environment& env)
+{
+  auto ca_hook_cmd = m_cfg->getValue("GLOBAL", "CERT_CA_HOOK");
+  if (!ca_hook_cmd.empty())
+  {
+    auto ca_hook = new Async::Exec(ca_hook_cmd);
+    ca_hook->addEnvironmentVars(env);
+    ca_hook->setTimeout(300); // Five minutes timeout
+    ca_hook->stdoutData.connect(
+        [=](const char* buf, int cnt)
+        {
+          std::cout << buf;
+        });
+    ca_hook->stderrData.connect(
+        [=](const char* buf, int cnt)
+        {
+          std::cerr << buf;
+        });
+    ca_hook->exited.connect(
+        [=](void) {
+          if (ca_hook->ifExited())
+          {
+            if (ca_hook->exitStatus() != 0)
+            {
+              std::cerr << "*** ERROR: CA hook exited with exit status "
+                        << ca_hook->exitStatus() << std::endl;
+            }
+          }
+          else if (ca_hook->ifSignaled())
+          {
+            std::cerr << "*** ERROR: CA hook exited with signal "
+                      << ca_hook->termSig() << std::endl;
+          }
+          Async::Application::app().runTask([=]{ delete ca_hook; });
+        });
+    ca_hook->run();
+  }
+} /* Reflector::runCAHook */
 
 
 /*
