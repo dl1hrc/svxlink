@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 /** @example MyNamespaceTemplate_demo.cpp
-An example of how to use the Template class
+An example of how to use the MyNamespace::Template class
 */
 
 #ifndef TEMPLATE_INCLUDED
