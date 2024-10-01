@@ -60,6 +60,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #ifdef HAS_GPIOD_SUPPORT
 #include "PttGpiod.h"
 #endif
+#include "PttSerial.h"
 
 
 
@@ -138,7 +139,7 @@ namespace {
 Ptt *PttFactoryBase::createNamedPtt(Config& cfg, const string& name)
 {
   PttDummy::Factory dummy_ptt_factory;
-  PttSerialPin::Factory serial_ptt_factory;
+  PttSerialPin::Factory serialpin_ptt_factory;
   PttGpio::Factory gpio_ptt_factory;
   PttPty::Factory pty_ptt_factory;
 #ifdef HAS_HIDRAW_SUPPORT
@@ -147,6 +148,7 @@ Ptt *PttFactoryBase::createNamedPtt(Config& cfg, const string& name)
 #ifdef HAS_GPIOD_SUPPORT
   PttGpiod::Factory gpiod_ptt_factory;
 #endif
+  PttSerial::Factory serial_ptt_factory;
 
   string ptt_type;
   if (!cfg.getValue(name, "PTT_TYPE", ptt_type) || ptt_type.empty())
