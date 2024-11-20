@@ -151,7 +151,7 @@ namespace {
       if (access(dirname.c_str(), F_OK) != 0)
       {
         std::cout << "Create directory '" << dirname << "'" << std::endl;
-        if (mkdir(dirname.c_str(), 0755) != 0)
+        if (mkdir(dirname.c_str(), 0777) != 0)
         {
           std::cerr << "*** ERROR: Could not create directory '"
                     << dirname << "'" << std::endl;
@@ -481,7 +481,7 @@ bool Reflector::signClientCert(Async::SslX509& cert, const std::string& ca_op)
 
   cert.setSerialNumber();
   cert.setIssuerName(m_issue_ca_cert.subjectName());
-  cert.setValidityTime(CERT_VALIDITY_DAYS);
+  cert.setValidityTime(CERT_VALIDITY_DAYS, CERT_VALIDITY_OFFSET_DAYS);
   auto cn = cert.commonName();
   if (!cert.sign(m_issue_ca_pkey))
   {
