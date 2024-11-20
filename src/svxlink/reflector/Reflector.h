@@ -191,14 +191,13 @@ class Reflector : public sigc::trackable
 
     Async::SslCertSigningReq loadClientPendingCsr(const std::string& callsign);
     Async::SslCertSigningReq loadClientCsr(const std::string& callsign);
-    bool signClientCert(Async::SslX509& cert);
+    bool signClientCert(Async::SslX509& cert, const std::string& ca_op);
     Async::SslX509 signClientCsr(const std::string& cn);
     Async::SslX509 loadClientCertificate(const std::string& callsign);
 
     size_t caSize(void) const { return m_ca_size; }
     const std::vector<uint8_t>& caDigest(void) const { return m_ca_md; }
     const std::vector<uint8_t>& caSignature(void) const { return m_ca_sig; }
-    const std::string& caUrl(void) const { return m_ca_url; }
     std::string clientCertPem(const std::string& callsign) const;
     std::string caBundlePem(void) const;
     std::string issuingCertPem(void) const;
@@ -213,7 +212,10 @@ class Reflector : public sigc::trackable
     typedef Async::TcpServer<Async::FramedTcpConnection> FramedTcpServer;
     using HttpServer = Async::TcpServer<Async::HttpServerConnection>;
 
-    static constexpr time_t CERT_VALIDITY_TIME = 90*24*3600;
+    static constexpr unsigned ROOT_CA_VALIDITY_DAYS     = 25*365;
+    static constexpr unsigned ISSUING_CA_VALIDITY_DAYS  = 4*90;
+    static constexpr unsigned CERT_VALIDITY_DAYS        = 90;
+    static constexpr int      CERT_VALIDITY_OFFSET_DAYS = -1;
 
     FramedTcpServer*            m_srv;
     Async::EncryptedUdpSocket*  m_udp_sock;
@@ -243,7 +245,6 @@ class Reflector : public sigc::trackable
     size_t                      m_ca_size = 0;
     std::vector<uint8_t>        m_ca_md;
     std::vector<uint8_t>        m_ca_sig;
-    std::string                 m_ca_url;
 
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);

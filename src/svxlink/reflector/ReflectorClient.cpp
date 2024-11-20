@@ -195,7 +195,8 @@ ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con
     m_reflector(ref), m_blocktime(0), m_remaining_blocktime(0),
     m_current_tg(0), m_udp_cipher_iv_cntr(0)
 {
-  m_con->setMaxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_SIZE);
+  m_con->setMaxRxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_SIZE);
+  m_con->setMaxTxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);
   m_con->sslConnectionReady.connect(
       sigc::mem_fun(*this, &ReflectorClient::onSslConnectionReady));
   m_con->frameReceived.connect(
@@ -265,24 +266,41 @@ void ReflectorClient::setRemoteUdpPort(uint16_t port)
 
 int ReflectorClient::sendMsg(const ReflectorMsg& msg)
 {
+  errno = 0;
+
   if (((m_con_state != STATE_CONNECTED) && (msg.type() >= 100)) ||
       !m_con->isConnected())
   {
     errno = ENOTCONN;
-    return -1;
   }
 
-  m_heartbeat_tx_cnt = HEARTBEAT_TX_CNT_RESET;
-
-  ReflectorMsg header(msg.type());
   ostringstream ss;
-  if (!header.pack(ss) || !msg.pack(ss))
+  if (errno == 0)
   {
-    cerr << "*** ERROR: Failed to pack TCP message\n";
-    errno = EBADMSG;
-    return -1;
+    m_heartbeat_tx_cnt = HEARTBEAT_TX_CNT_RESET;
+
+    ReflectorMsg header(msg.type());
+    if (!header.pack(ss) || !msg.pack(ss))
+    {
+      cerr << "*** ERROR: Failed to pack TCP message\n";
+      errno = EBADMSG;
+    }
   }
-  return m_con->write(ss.str().data(), ss.str().size());
+
+  if (errno == 0)
+  {
+    auto ret = m_con->write(ss.str().data(), ss.str().size());
+    if (ret >= 0)
+    {
+      return ret;
+    }
+  }
+  std::cerr << "*** ERROR[" << m_con->remoteHost() << ":"
+            << m_con->remotePort() << "]: Write to client failed due to '"
+            << strerror(errno) << "'. Message type=" << msg.type() << "."
+            << std::endl;
+  disconnect();
+  return -1;
 } /* ReflectorClient::sendMsg */
 
 
@@ -383,7 +401,7 @@ void ReflectorClient::onSslConnectionReady(TcpConnection *con)
     return;
   }
 
-  m_con->setMaxFrameSize(ReflectorMsg::MAX_POST_SSL_SETUP_SIZE);
+  //m_con->setMaxRxFrameSize(ReflectorMsg::MAX_POST_SSL_SETUP_FRAME_SIZE);
 
   Async::SslX509 peer_cert(con->sslPeerCertificate());
   if (peer_cert.isNull())
@@ -423,7 +441,7 @@ void ReflectorClient::onSslConnectionReady(TcpConnection *con)
   }
 
   int days=0, seconds=0;
-  peer_cert.timeSpan(days, seconds);
+  peer_cert.validityTime(days, seconds);
   time_t renew_time = peer_cert.notBefore() +
       (static_cast<time_t>(days)*24*3600 + seconds)*RENEW_AFTER;
   //std::cout << "### Client cert days=" << days << " seconds="
@@ -596,7 +614,7 @@ void ReflectorClient::handleMsgProtoVer(std::istream& is)
   {
     //std::cout << "### ReflectorClient::handMsgProtoVer: Send CAInfo"
     //          << std::endl;
-    m_con->setMaxFrameSize(ReflectorMsg::MAX_PRE_SSL_SETUP_SIZE);
+    //m_con->setMaxRxFrameSize(ReflectorMsg::MAX_PRE_SSL_SETUP_FRAME_SIZE);
     sendMsg(MsgCAInfo(m_reflector->caSize(), m_reflector->caDigest()));
     m_con_state = STATE_EXPECT_START_ENCRYPTION;
   }
@@ -620,8 +638,8 @@ void ReflectorClient::handleMsgCABundleRequest(std::istream& is)
     return;
   }
 
-  std::cout << "### Sending CA Bundle" << std::endl;
-  m_con->setMaxFrameSize(ReflectorMsg::MAX_PRE_SSL_SETUP_SIZE);
+  //std::cout << "### Sending CA Bundle" << std::endl;
+  //m_con->setMaxRxFrameSize(ReflectorMsg::MAX_PRE_SSL_SETUP_FRAME_SIZE);
   sendMsg(MsgCABundle(m_reflector->caBundlePem(), m_reflector->caSignature(),
                       m_reflector->issuingCertPem()));
 } /* ReflectorClient::handleMsgCABundleRequest */
@@ -654,6 +672,7 @@ void ReflectorClient::handleMsgStartEncryptionRequest(std::istream& is)
   std::cout << m_con->remoteHost() << ":" << m_con->remotePort()
             << ": Starting encryption" << std::endl;
 
+  m_con->setMaxRxFrameSize(ReflectorMsg::MAX_SSL_SETUP_FRAME_SIZE);
   sendMsg(MsgStartEncryption());
   m_con->enableSsl(true);
   m_con_state = STATE_EXPECT_SSL_CON_READY;
@@ -1209,7 +1228,7 @@ void ReflectorClient::connectionAuthenticated(const std::string& callsign)
   if (find(connected_nodes.begin(), connected_nodes.end(),
            callsign) == connected_nodes.end())
   {
-    m_con->setMaxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);
+    m_con->setMaxRxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);
     m_callsign = callsign;
     sendMsg(MsgAuthOk());
     cout << m_callsign << ": Login OK from "
@@ -1305,7 +1324,7 @@ void ReflectorClient::renewClientCertificate(void)
 {
   std::cout << m_callsign << ": Renew client certificate" << std::endl;
   auto cert = m_con->sslPeerCertificate();
-  if (cert.isNull() || !m_reflector->signClientCert(cert))
+  if (cert.isNull() || !m_reflector->signClientCert(cert, "CRT_RENEWED"))
   {
     std::cerr << "*** WARNING: Certificate resigning for '"
               << m_callsign << "' failed" << std::endl;

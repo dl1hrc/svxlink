@@ -151,7 +151,7 @@ namespace {
       if (access(dirname.c_str(), F_OK) != 0)
       {
         std::cout << "Create directory '" << dirname << "'" << std::endl;
-        if (mkdir(dirname.c_str(), 0755) != 0)
+        if (mkdir(dirname.c_str(), 0777) != 0)
         {
           std::cerr << "*** ERROR: Could not create directory '"
                     << dirname << "'" << std::endl;
@@ -166,7 +166,7 @@ namespace {
   void startCertRenewTimer(const Async::SslX509& cert, Async::AtTimer& timer)
   {
     int days=0, seconds=0;
-    cert.timeSpan(days, seconds);
+    cert.validityTime(days, seconds);
     time_t renew_time = cert.notBefore() +
         (static_cast<time_t>(days)*24*3600 + seconds)*RENEW_AFTER;
     timer.setTimeout(renew_time);
@@ -475,15 +475,13 @@ Reflector::loadClientCsr(const std::string& callsign)
 } /* Reflector::loadClientPendingCsr */
 
 
-bool Reflector::signClientCert(Async::SslX509& cert)
+bool Reflector::signClientCert(Async::SslX509& cert, const std::string& ca_op)
 {
   //std::cout << "### Reflector::signClientCert" << std::endl;
 
   cert.setSerialNumber();
   cert.setIssuerName(m_issue_ca_cert.subjectName());
-  time_t tnow = time(NULL);
-  cert.setNotBefore(tnow);
-  cert.setNotAfter(tnow + CERT_VALIDITY_TIME);
+  cert.setValidityTime(CERT_VALIDITY_DAYS, CERT_VALIDITY_OFFSET_DAYS);
   auto cn = cert.commonName();
   if (!cert.sign(m_issue_ca_pkey))
   {
@@ -495,7 +493,7 @@ bool Reflector::signClientCert(Async::SslX509& cert)
   if (cert.writePemFile(crtfile) && m_issue_ca_cert.appendPemFile(crtfile))
   {
     runCAHook({
-        { "CA_OP",      "CSR_SIGNED" },
+        { "CA_OP",      ca_op },
         { "CA_CRT_PEM", cert.pem() }
       });
   }
@@ -537,7 +535,7 @@ Async::SslX509 Reflector::signClientCsr(const std::string& cn)
   Async::SslKeypair csr_pkey(req.publicKey());
   cert.setPublicKey(csr_pkey);
 
-  if (!signClientCert(cert))
+  if (!signClientCert(cert, "CSR_SIGNED"))
   {
     cert.set(nullptr);
   }
@@ -1611,8 +1609,8 @@ bool Reflector::loadCertificateFiles(void)
   }
   ca_dgst.signInit(MsgCABundle::MD_ALG, m_issue_ca_pkey);
   m_ca_sig = ca_dgst.sign(bundle);
-  m_ca_url = "";
-  m_cfg->getValue("GLOBAL", "CERT_CA_URL", m_ca_url);
+  //m_ca_url = "";
+  //m_cfg->getValue("GLOBAL", "CERT_CA_URL", m_ca_url);
 
   return true;
 } /* Reflector::loadCertificateFiles */
@@ -1672,7 +1670,7 @@ bool Reflector::loadServerCertificateFiles(void)
     else
     {
       int days=0, seconds=0;
-      cert.timeSpan(days, seconds);
+      cert.validityTime(days, seconds);
       //std::cout << "### days=" << days << "  seconds=" << seconds
       //          << std::endl;
       time_t tnow = time(NULL);
@@ -1746,9 +1744,7 @@ bool Reflector::loadServerCertificateFiles(void)
     cert.setVersion(Async::SslX509::VERSION_3);
     cert.setIssuerName(m_issue_ca_cert.subjectName());
     cert.setSubjectName(req.subjectName());
-    time_t tnow = time(NULL);
-    cert.setNotBefore(tnow);
-    cert.setNotAfter(tnow + CERT_VALIDITY_TIME);
+    cert.setValidityTime(CERT_VALIDITY_DAYS);
     cert.addExtensions(req.extensions());
     cert.setPublicKey(pkey);
     cert.sign(m_issue_ca_pkey);
@@ -1901,9 +1897,7 @@ bool Reflector::loadRootCAFiles(void)
       ca_exts.addSubjectAltNames("email:" + value);
     }
     m_ca_cert.addExtensions(ca_exts);
-    time_t tnow = time(NULL);
-    m_ca_cert.setNotBefore(tnow);
-    m_ca_cert.setNotAfter(tnow + 25*365*24*3600);
+    m_ca_cert.setValidityTime(ROOT_CA_VALIDITY_DAYS);
     m_ca_cert.setPublicKey(m_ca_pkey);
     m_ca_cert.sign(m_ca_pkey);
     if (!m_ca_cert.writePemFile(ca_crtfile))
@@ -1975,7 +1969,7 @@ bool Reflector::loadSigningCAFiles(void)
     else
     {
       int days=0, seconds=0;
-      m_issue_ca_cert.timeSpan(days, seconds);
+      m_issue_ca_cert.validityTime(days, seconds);
       time_t tnow = time(NULL);
       time_t renew_time = tnow + (days*24*3600 + seconds)*RENEW_AFTER;
       if (!m_issue_ca_cert.timeIsWithinRange(tnow, renew_time))
@@ -2058,9 +2052,7 @@ bool Reflector::loadSigningCAFiles(void)
     m_issue_ca_cert.setVersion(Async::SslX509::VERSION_3);
     m_issue_ca_cert.setSubjectName(csr.subjectName());
     m_issue_ca_cert.addExtensions(csr.extensions());
-    time_t tnow = time(NULL);
-    m_issue_ca_cert.setNotBefore(tnow);
-    m_issue_ca_cert.setNotAfter(tnow + 4*CERT_VALIDITY_TIME);
+    m_issue_ca_cert.setValidityTime(ISSUING_CA_VALIDITY_DAYS);
     m_issue_ca_cert.setPublicKey(m_issue_ca_pkey);
     m_issue_ca_cert.setIssuerName(m_ca_cert.subjectName());
     m_issue_ca_cert.sign(m_ca_pkey);
