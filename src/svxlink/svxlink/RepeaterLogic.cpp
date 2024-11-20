@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -109,6 +109,16 @@ using namespace Async;
 
 
 
+/****************************************************************************
+ *
+ * Exported Global functions
+ *
+ ****************************************************************************/
+
+extern "C" {
+  LogicBase* construct(void) { return new RepeaterLogic; }
+}
+
 
 /****************************************************************************
  *
@@ -125,8 +135,8 @@ using namespace Async;
  ****************************************************************************/
 
 
-RepeaterLogic::RepeaterLogic(Async::Config& cfg, const std::string& name)
-  : Logic(cfg, name), repeater_is_up(false),
+RepeaterLogic::RepeaterLogic(void)
+  : repeater_is_up(false),
     up_timer(30000, Timer::TYPE_ONESHOT, false),
     idle_sound_timer(-1, Timer::TYPE_PERIODIC),
     open_on_sql_after_rpt_close(0), open_on_dtmf('?'),
@@ -134,7 +144,8 @@ RepeaterLogic::RepeaterLogic(Async::Config& cfg, const std::string& name)
     open_sql_flank(SQL_FLANK_CLOSE),
     short_sql_open_cnt(0), sql_flap_sup_min_time(1000),
     sql_flap_sup_max_cnt(0), rgr_enable(true), open_reason("?"),
-    ident_nag_min_time(2000), ident_nag_timer(-1)
+    ident_nag_min_time(2000), ident_nag_timer(-1), delayed_tg_activation(0),
+    open_on_ctcss_timer(-1)
 {
   up_timer.expired.connect(mem_fun(*this, &RepeaterLogic::idleTimeout));
   open_on_sql_timer.expired.connect(
@@ -147,47 +158,60 @@ RepeaterLogic::RepeaterLogic(Async::Config& cfg, const std::string& name)
 } /* RepeaterLogic::RepeaterLogic */
 
 
-RepeaterLogic::~RepeaterLogic(void)
+bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 {
-} /* RepeaterLogic::~RepeaterLogic */
-
-
-bool RepeaterLogic::initialize(void)
-{
-  if (!Logic::initialize())
+  if (!Logic::initialize(cfgobj, logic_name))
   {
     return false;
   }
-  
-  float open_on_ctcss_fq = 0;
-  int open_on_ctcss_duration = 0;
-  int required_1750_duration = 0;
-  
+
   int idle_timeout;
   if (cfg().getValue(name(), "IDLE_TIMEOUT", idle_timeout))
   {
     up_timer.setTimeout(idle_timeout * 1000);
   }
-  
+
+  int required_1750_duration = 0;
+  cfg().getValue(name(), "OPEN_ON_1750", required_1750_duration);
+
   string str;
-  if (cfg().getValue(name(), "OPEN_ON_1750", str))
+  float open_on_ctcss_fq = 0;
+  int open_on_ctcss_duration = -1;
+  if (cfg().getValue(name(), "OPEN_ON_CTCSS", open_on_ctcss_duration))
   {
-    required_1750_duration = atoi(str.c_str());
+    open_on_ctcss_timer.setTimeout(open_on_ctcss_duration);
   }
-  
-  if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
+  else if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
   {
+    std::cerr << "*** WARNING: Deprecated syntax for the " << name()
+              << "/OPEN_ON_CTCSS configuration variable. "
+                 "Should be OPEN_ON_CTCSS=<delay in milliseconds>."
+              << std::endl;
     string::iterator it;
     it = find(str.begin(), str.end(), ':');
-    if (it == str.end())
+    if (it != str.end())
+    {
+      string fq_str(str.begin(), it);
+      string dur_str(it+1, str.end());
+      open_on_ctcss_fq = atof(fq_str.c_str());
+      open_on_ctcss_duration = atoi(dur_str.c_str());
+      open_on_ctcss_timer.setTimeout(open_on_ctcss_duration);
+    }
+    else
     {
       cerr << "*** ERROR: Illegal format for config variable " << name()
-      	   << "/OPEN_ON_CTCSS. Should be <fq>:<required duration>.\n";
+           << "/OPEN_ON_CTCSS. Should be <fq>:<required duration> when using "
+              "the deprecated syntax.\n";
     }
-    string fq_str(str.begin(), it);
-    string dur_str(it+1, str.end());
-    open_on_ctcss_fq = atof(fq_str.c_str());
-    open_on_ctcss_duration = atoi(dur_str.c_str());
+  }
+  if (open_on_ctcss_duration >= 0)
+  {
+    open_on_ctcss_timer.expired.connect([&](Async::Timer*) {
+          //std::cout << "### open_on_ctcss_timer expired" << std::endl;
+          open_reason = "CTCSS";
+          activateOnOpenOrClose(open_sql_flank);
+          open_on_ctcss_timer.setEnable(false);
+        });
   }
 
   int required_sql_open_duration;
@@ -294,7 +318,7 @@ bool RepeaterLogic::initialize(void)
   
   if ((open_on_ctcss_fq > 0) && (open_on_ctcss_duration > 0))
   {
-    if (!rx().addToneDetector(open_on_ctcss_fq, 4, 10, open_on_ctcss_duration))
+    if (!rx().addToneDetector(open_on_ctcss_fq, 2, 10, open_on_ctcss_duration))
     {
       cerr << "*** WARNING: Could not setup CTCSS tone detection in logic "
            << name() << "\n";
@@ -440,6 +464,34 @@ void RepeaterLogic::audioStreamStateChange(bool is_active, bool is_idle)
 } /* Logic::audioStreamStateChange */
 
 
+void RepeaterLogic::dtmfCtrlPtyCmdReceived(const void *buf, size_t count)
+{
+  if (!repeater_is_up)
+  {
+    setUp(true, "PTY_DTMF_CMD");
+  }
+  Logic::dtmfCtrlPtyCmdReceived(buf, count);
+} /* RepeaterLogic::dtmfCtrlPtyCmdReceived */
+
+
+void RepeaterLogic::setReceivedTg(uint32_t tg)
+{
+  //std::cout << "### RepeaterLogic::setReceivedTg: repeater_is_up="
+  //          << repeater_is_up << "  activate_on_sql_close="
+  //          << activate_on_sql_close << "  tg=" << tg << std::endl;
+  if (repeater_is_up)
+  {
+    Logic::setReceivedTg(tg);
+  }
+  else
+  {
+    //std::cout << "### RepeaterLogic::setReceivedTg: Delayed TG activation"
+    //          << std::endl;
+    delayed_tg_activation = tg;
+  }
+} /* RepeaterLogic::setReceivedTg */
+
+
 #if 0
 bool RepeaterLogic::getIdleState(void) const
 {
@@ -495,8 +547,8 @@ void RepeaterLogic::setIdle(bool idle)
 
 void RepeaterLogic::setUp(bool up, string reason)
 {
-  //printf("RepeaterLogic::setUp: up=%s  reason=%s\n",
-  //    	 up ? "true" : "false", reason.c_str());
+  //std::cout << "### RepeaterLogic::setUp: up=" << up
+  //          << "  reason=" << reason << std::endl;
   if (up == repeater_is_up)
   {
     return;
@@ -523,6 +575,12 @@ void RepeaterLogic::setUp(bool up, string reason)
         (reason != "AUDIO") && (reason != "SQL_RPT_REOPEN"))
     {
       ident_nag_timer.setEnable(true);
+    }
+
+    if (delayed_tg_activation > 0)
+    {
+      Logic::setReceivedTg(delayed_tg_activation);
+      delayed_tg_activation = 0;
     }
   }
   else
@@ -628,11 +686,15 @@ void RepeaterLogic::squelchOpen(bool is_open)
     else
     {
       open_on_sql_timer.setEnable(false);
+      open_on_ctcss_timer.setEnable(false);
       if (activate_on_sql_close)
       {
       	activate_on_sql_close = false;
       	setUp(true, open_reason);
+        //Logic::setReceivedTg(delayed_tg_activation);
+        Logic::squelchOpen(false);
       }
+      delayed_tg_activation = 0;
     }
   }
 } /* RepeaterLogic::squelchOpen */
@@ -640,14 +702,22 @@ void RepeaterLogic::squelchOpen(bool is_open)
 
 void RepeaterLogic::detectedTone(float fq)
 {
+  if (fq >= 300.0f)
+  {
+    std::cout << name() << ": " << fq << " Hz tone call detected"
+              << std::endl;
+  }
+
   if (!repeater_is_up && !activate_on_sql_close)
   {
-    cout << name() << ": " << fq << " Hz tone call detected" << endl;
-    
     if (fq < 300.0)
     {
-      open_reason = "CTCSS";
-      activateOnOpenOrClose(open_sql_flank);
+      std::cout << name() << ": " << fq << " Hz CTCSS tone detected"
+                << std::endl;
+      if (open_on_ctcss_timer.timeout() >= 0)
+      {
+        open_on_ctcss_timer.setEnable(true);
+      }
     }
     else
     {

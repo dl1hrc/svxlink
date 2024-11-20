@@ -10,7 +10,7 @@ the SvxLink core is running. It can also be a DDR (Digital Drop Receiver).
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2014 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -40,6 +40,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <sys/time.h>
+#include <stdint.h>
+#include <vector>
 
 
 /****************************************************************************
@@ -76,6 +78,7 @@ namespace Async
 };
 
 class Squelch;
+class HdlcDeframer;
 
 
 /****************************************************************************
@@ -151,8 +154,8 @@ class LocalRxBase : public Rx
      * @brief 	Set the mute state for this receiver
      * @param 	mute_state The mute state to set for this receiver
      */
-    virtual void setMuteState(MuteState new_mute_state);
-    
+    virtual void setMuteState(MuteState new_mute_state) override;
+
     /**
      * @brief 	Call this function to add a tone detector to the RX
      * @param 	fq The tone frequency to detect
@@ -171,21 +174,54 @@ class LocalRxBase : public Rx
      * @return	Returns the signal strength
      */
     virtual float signalStrength(void) const;
-    
+
+    /**
+     * @brief 	Find out RX ID of last receiver with squelch activity
+     * @returns Returns the RX ID
+     */
+    char sqlRxId(void) const;
+
     /**
      * @brief 	Reset the receiver object to its default settings
      */
     virtual void reset(void);
 
     /**
+     * @brief   Register a fullband (unfiltered) audio sink
+     * @param   sink The sink to register
+     *
+     * Use this function to register a sink for handling fullband audio, that
+     * is receiver audio that is not filtered. This can be used to get access
+     * to audio outside of the voice band, in theory 0 to 8000 Hz.
+     */
+    void registerFullbandSink(Async::AudioSink* sink);
+
+    /**
+     * @brief   Unregister a fullband (unfiltered) audio sink
+     * @param   sink The sink to unregister
+     *
+     * Use this function to unregister a sink for handling fullband audio.
+     * See the documentation for the registerFullbandSink() function for more
+     * information.
+     */
+    void unregisterFullbandSink(Async::AudioSink* sink);
+
+    /**
+     * @bried   Get the squelch detector associated with this receiver
+     * @returns Returns a pointer to the squelch detector or nullptr if none
+     */
+    Squelch* squelchDetector(void) { return squelch_det; }
+
+    /**
      * @brief  A signal that is emitted when the CTCSS tone SNR has changed
      * @param  snr The current SNR
+     * @param  fq  The CTCSS frequency
      *
      * This signal will be emitted as soon as a new SNR value for the CTCSS
      * tone has been calculated. The signal will only be emitted when
-     * CTCSS_MODE is set to 2 or 3.
+     * CTCSS_MODE is set to 2, 3 or 4.
      */
-    sigc::signal<void, float> ctcssSnrUpdated;
+    sigc::signal<void, float, float> ctcssSnrUpdated;
     
   protected:
     /**
@@ -228,8 +264,6 @@ class LocalRxBase : public Rx
     virtual Async::AudioSource *audioSource(void) = 0;
     
   private:
-    Async::Config     	      	&cfg;
-    MuteState      	      	mute_state;
     Squelch   	      	      	*squelch_det;
     SigLevDet 	      	        *siglevdet;
     Async::AudioSplitter      	*tone_dets;
@@ -243,9 +277,16 @@ class LocalRxBase : public Rx
     unsigned                    sql_extended_hangtime_thresh;
     Async::AudioFifo            *input_fifo;
     int                         dtmf_muting_pre;
-    
+    HdlcDeframer *              ob_afsk_deframer;
+    HdlcDeframer *              ib_afsk_deframer;
+    bool                        audio_dev_keep_open;
+    Async::AudioSplitter *      fullband_splitter;
+
     int audioRead(float *samples, int count);
     void dtmfDigitActivated(char digit);
+    void onToneDetected(float fq);
+    void dataFrameReceived(std::vector<uint8_t> frame);
+    void dataFrameReceivedIb(std::vector<uint8_t> frame);
     void dtmfDigitDeactivated(char digit, int duration_ms);
     void sel5Detected(std::string sequence);
     void audioStreamStateChange(bool is_active, bool is_idle);
@@ -254,6 +295,8 @@ class LocalRxBase : public Rx
     void onSignalLevelUpdated(float siglev);
     void setSqlHangtimeFromSiglev(float siglev);
     void rxReadyStateChanged(void);
+    void publishSquelchState(void);
+    void cfgUpdated(const std::string& section, const std::string& tag);
 
 };  /* class LocalRxBase */
 

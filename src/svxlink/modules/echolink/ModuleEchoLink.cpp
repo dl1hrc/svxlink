@@ -39,6 +39,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <cstdlib>
 #include <vector>
 
+#include <string.h>
 
 /****************************************************************************
  *
@@ -58,13 +59,16 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <common.h>
 
 
+#include <AsyncPty.h>
+#include <AsyncPtyStreamBuf.h>
+
 /****************************************************************************
  *
  * Local Includes
  *
  ****************************************************************************/
 
-#include "version/MODULE_ECHOLINK.h"
+#include "version/MODULE_ECHO_LINK.h"
 #include "ModuleEchoLink.h"
 #include "QsoImpl.h"
 
@@ -122,6 +126,13 @@ using namespace EchoLink;
  *
  ****************************************************************************/
 
+namespace {
+  const char* CFG_DROP_INCOMING   = "DROP_INCOMING";
+  const char* CFG_REJECT_INCOMING = "REJECT_INCOMING";
+  const char* CFG_ACCEPT_INCOMING = "ACCEPT_INCOMING";
+  const char* CFG_REJECT_OUTGOING = "REJECT_OUTGOING";
+  const char* CFG_ACCEPT_OUTGOING = "ACCEPT_OUTGOING";
+};
 
 
 /****************************************************************************
@@ -158,9 +169,9 @@ ModuleEchoLink::ModuleEchoLink(void *dl_handle, Logic *logic,
     listen_only_valve(0), selector(0), num_con_max(0), num_con_ttl(5*60),
     num_con_block_time(120*60), num_con_update_timer(0), reject_conf(false),
     autocon_echolink_id(0), autocon_time(DEFAULT_AUTOCON_TIME),
-    autocon_timer(0), proxy(0)
+    autocon_timer(0), proxy(0), pty(0)
 {
-  cout << "\tModule EchoLink v" MODULE_ECHOLINK_VERSION " starting...\n";
+  cout << "\tModule EchoLink v" MODULE_ECHO_LINK_VERSION " starting...\n";
   
 } /* ModuleEchoLink */
 
@@ -269,26 +280,13 @@ bool ModuleEchoLink::initialize(void)
   }
   
   cfg().getValue(cfgName(), "ALLOW_IP", allow_ip);
-  
-  if (!cfg().getValue(cfgName(), "DROP_INCOMING", value))
+
+  if (!setDropIncomingRegex())
   {
-    value = "^$";
-  }
-  drop_incoming_regex = new regex_t;
-  int err = regcomp(drop_incoming_regex, value.c_str(),
-                    REG_EXTENDED | REG_NOSUB | REG_ICASE);
-  if (err != 0)
-  {
-    size_t msg_size = regerror(err, drop_incoming_regex, 0, 0);
-    char msg[msg_size];
-    size_t err_size = regerror(err, drop_incoming_regex, msg, msg_size);
-    assert(err_size == msg_size);
-    cerr << "*** ERROR: Syntax error in " << cfgName() << "/DROP_INCOMING: "
-         << msg << endl;
     moduleCleanup();
     return false;
   }
-  
+
     // To reduce the number of senseless connects
   if (cfg().getValue(cfgName(), "CHECK_NR_CONNECTS", value))
   {
@@ -308,82 +306,15 @@ bool ModuleEchoLink::initialize(void)
     num_con_block_time = params[2] * 60;
   }
 
-  if (!cfg().getValue(cfgName(), "REJECT_INCOMING", value))
+  if (!setRejectIncomingRegex() ||
+      !setAcceptIncomingRegex() ||
+      !setRejectOutgoingRegex() ||
+      !setAcceptOutgoingRegex())
   {
-    value = "^$";
-  }
-  reject_incoming_regex = new regex_t;
-  err = regcomp(reject_incoming_regex, value.c_str(),
-                REG_EXTENDED | REG_NOSUB | REG_ICASE);
-  if (err != 0)
-  {
-    size_t msg_size = regerror(err, reject_incoming_regex, 0, 0);
-    char msg[msg_size];
-    size_t err_size = regerror(err, reject_incoming_regex, msg, msg_size);
-    assert(err_size == msg_size);
-    cerr << "*** ERROR: Syntax error in " << cfgName() << "/REJECT_INCOMING: "
-         << msg << endl;
-    moduleCleanup();
-    return false;
-  }
-  
-  if (!cfg().getValue(cfgName(), "ACCEPT_INCOMING", value))
-  {
-    value = "^.*$";
-  }
-  accept_incoming_regex = new regex_t;
-  err = regcomp(accept_incoming_regex, value.c_str(),
-                REG_EXTENDED | REG_NOSUB | REG_ICASE);
-  if (err != 0)
-  {
-    size_t msg_size = regerror(err, accept_incoming_regex, 0, 0);
-    char msg[msg_size];
-    size_t err_size = regerror(err, accept_incoming_regex, msg, msg_size);
-    assert(err_size == msg_size);
-    cerr << "*** ERROR: Syntax error in " << cfgName() << "/ACCEPT_INCOMING: "
-         << msg << endl;
     moduleCleanup();
     return false;
   }
 
-  if (!cfg().getValue(cfgName(), "REJECT_OUTGOING", value))
-  {
-    value = "^$";
-  }
-  reject_outgoing_regex = new regex_t;
-  err = regcomp(reject_outgoing_regex, value.c_str(),
-                REG_EXTENDED | REG_NOSUB | REG_ICASE);
-  if (err != 0)
-  {
-    size_t msg_size = regerror(err, reject_outgoing_regex, 0, 0);
-    char msg[msg_size];
-    size_t err_size = regerror(err, reject_outgoing_regex, msg, msg_size);
-    assert(err_size == msg_size);
-    cerr << "*** ERROR: Syntax error in " << cfgName() << "/REJECT_OUTGOING: "
-         << msg << endl;
-    moduleCleanup();
-    return false;
-  }
-
-  if (!cfg().getValue(cfgName(), "ACCEPT_OUTGOING", value))
-  {
-    value = "^.*$";
-  }
-  accept_outgoing_regex = new regex_t;
-  err = regcomp(accept_outgoing_regex, value.c_str(),
-                REG_EXTENDED | REG_NOSUB | REG_ICASE);
-  if (err != 0)
-  {
-    size_t msg_size = regerror(err, accept_outgoing_regex, 0, 0);
-    char msg[msg_size];
-    size_t err_size = regerror(err, accept_outgoing_regex, msg, msg_size);
-    assert(err_size == msg_size);
-    cerr << "*** ERROR: Syntax error in " << cfgName() << "/ACCEPT_OUTGOING: "
-         << msg << endl;
-    moduleCleanup();
-    return false;
-  }
-  
   cfg().getValue(cfgName(), "REJECT_CONF", reject_conf);
   cfg().getValue(cfgName(), "AUTOCON_ECHOLINK_ID", autocon_echolink_id);
   int autocon_time_secs = autocon_time / 1000;
@@ -429,8 +360,13 @@ bool ModuleEchoLink::initialize(void)
     moduleCleanup();
     return false;
   }
-  Dispatcher::instance()->incomingConnection.connect(
-      mem_fun(*this, &ModuleEchoLink::onIncomingConnection));
+  bool drop_all_incoming = false;
+  if (!cfg().getValue(cfgName(), "DROP_ALL_INCOMING", drop_all_incoming) ||
+      !drop_all_incoming)
+  {
+    Dispatcher::instance()->incomingConnection.connect(
+        mem_fun(*this, &ModuleEchoLink::onIncomingConnection));
+  }
 
     // Create audio pipe chain for audio transmitted to the remote EchoLink
     // stations: <from core> -> Valve -> Splitter (-> QsoImpl ...)
@@ -460,6 +396,24 @@ bool ModuleEchoLink::initialize(void)
     autocon_timer->expired.connect(
         mem_fun(*this, &ModuleEchoLink::checkAutoCon));
   }
+
+  string pty_path;
+  if(cfg().getValue(cfgName(), "COMMAND_PTY", pty_path))
+  {
+    pty = new Pty(pty_path);
+    if (!pty->open())
+    {
+      cerr << "*** ERROR: Could not open echolink PTY "
+           << pty_path << " as specified in configuration variable "
+           << name() << "/" << "COMMAND_PTY" << endl;
+      return false;
+    }
+    pty->dataReceived.connect(
+        sigc::mem_fun(*this, &ModuleEchoLink::onCommandPtyInput));
+  }
+
+  cfg().valueUpdated.connect(
+      sigc::mem_fun(*this, &ModuleEchoLink::cfgValueUpdated));
 
   return true;
   
@@ -500,6 +454,85 @@ void ModuleEchoLink::logicIdleStateChanged(bool is_idle)
  * Private member functions
  *
  ****************************************************************************/
+
+void ModuleEchoLink::handlePtyCommand(const std::string &full_command)
+{
+  istringstream is(full_command);
+  string command;
+  if (!(is >> command))
+  {
+    return;
+  }
+
+  if (command == "KILL") // Disconnect active talker
+  {
+    if (talker == 0)
+    {
+      cout << "EchoLink: Trying to KILL, but no active talker" << endl;
+    }
+    else
+    {
+      cout << "EchoLink: Killing talker: " << talker->remoteCallsign() << endl;
+      talker->disconnect();
+    }
+  }
+  else if (command == "DISC") // Disconnect client by callsign
+  {
+    string callsign;
+    if (!(is >> callsign))
+    {
+      cerr << "*** WARNING: Malformed EchoLink PTY disconnect command: \""
+           << full_command << "\"" << endl;
+      return;
+    }
+    vector<QsoImpl *>::iterator it;
+    for (it = qsos.begin(); it != qsos.end(); ++it)
+    {
+      if ((*it)->remoteCallsign() == callsign)
+      {
+        cout << "EchoLink: Disconnecting user "
+             << (*it)->remoteCallsign() << endl;
+        (*it)->disconnect();
+        return;
+      }
+    }
+    cerr << "*** WARNING: Could not find EchoLink user \"" << callsign
+         << "\" in PTY command \"DISC\"" << endl;
+  }
+  else
+  {
+    cerr << "*** WARNING: Unknown EchoLink PTY command received: \""
+         << full_command << "\"" << endl;
+  }
+} /* ModuleEchoLink::handlePtyCommand */
+
+
+void ModuleEchoLink::onCommandPtyInput(const void *buf, size_t count)
+{
+  const char *buffer = reinterpret_cast<const char*>(buf);
+  for (size_t i=0; i<count; ++i)
+  {
+    char ch = buffer[i];
+    switch (ch)
+    {
+      case '\n':  // Execute command on NL
+        handlePtyCommand(command_buf);
+        command_buf.clear();
+        break;
+
+      case '\r':  // Ignore CR
+        break;
+
+      default:    // Append character to command buffer
+        if (command_buf.size() >= 256)  // Prevent cmd buffer growing too big
+        {
+          command_buf.clear();
+        }
+        command_buf += ch;
+        break;
+    }
+  }
+} /* ModuleEchoLink::onCommandPtyInput */
 
 
 void ModuleEchoLink::moduleCleanup(void)
@@ -898,6 +931,34 @@ void ModuleEchoLink::onError(const string& msg)
 } /* onError */
 
 
+/*
+ *----------------------------------------------------------------------------
+ * Method:    clientListChanged
+ * Purpose:   Called on connect or disconnect of a remote client to send an
+ *    	      event to list the connected stations.
+ * Input:     None
+ * Output:    None
+ * Author:    Wim Fournier / PH7WIM
+ * Created:   2016-01-11
+ * Remarks:
+ * Bugs:
+ *----------------------------------------------------------------------------
+ */
+void ModuleEchoLink::clientListChanged(void)
+{
+  stringstream ss;
+  ss << "client_list_changed [list";
+  for (vector<QsoImpl *>::iterator it = qsos.begin(); it != qsos.end(); ++it)
+  {
+    if ((*it)->currentState() != Qso::STATE_DISCONNECTED)
+    {
+      ss << " " << (*it)->remoteCallsign();
+    }
+  }
+  ss << "]";
+  processEvent(ss.str());
+} /* clientListChanged */
+
 
 /*
  *----------------------------------------------------------------------------
@@ -981,6 +1042,8 @@ void ModuleEchoLink::onIncomingConnection(const IpAddress& ip,
   qso->stateChange.connect(mem_fun(*this, &ModuleEchoLink::onStateChange));
   qso->chatMsgReceived.connect(
           mem_fun(*this, &ModuleEchoLink::onChatMsgReceived));
+  qso->infoMsgReceived.connect(
+          mem_fun(*this, &ModuleEchoLink::onInfoMsgReceived));
   qso->isReceiving.connect(mem_fun(*this, &ModuleEchoLink::onIsReceiving));
   qso->audioReceivedRaw.connect(
       	  mem_fun(*this, &ModuleEchoLink::audioFromRemoteRaw));
@@ -1088,9 +1151,15 @@ void ModuleEchoLink::onStateChange(QsoImpl *qso, Qso::State qso_state)
 
       broadcastTalkerStatus();
       updateDescription();
+      clientListChanged();
       break;
     }
     
+    case Qso::STATE_CONNECTED:
+      updateEventVariables();
+      clientListChanged();
+      break;
+
     default:
       updateEventVariables();
       break;
@@ -1143,6 +1212,37 @@ void ModuleEchoLink::onChatMsgReceived(QsoImpl *qso, const string& msg)
 
 /*
  *----------------------------------------------------------------------------
+ * Method:    onInfoMsgReceived
+ * Purpose:   Called by the EchoLink::Qso object when a info message has been
+ *    	      received from the remote station.
+ * Input:     qso - The QSO object
+ *    	      msg - The received message
+ * Output:    None
+ * Author:    Tobias Blomberg / SM0SVX
+ * Created:   2017-05-13
+ * Remarks:
+ * Bugs:
+ *----------------------------------------------------------------------------
+ */
+void ModuleEchoLink::onInfoMsgReceived(QsoImpl *qso, const string& msg)
+{
+    // Escape TCL control characters
+  string escaped(msg);
+  replaceAll(escaped, "\\", "\\\\");
+  replaceAll(escaped, "{", "\\{");
+  replaceAll(escaped, "}", "\\}");
+  stringstream ss;
+    // FIXME: This TCL specific code should not be here
+  ss << "info_received \"" << qso->remoteCallsign()
+     << "\" [subst -nocommands -novariables {";
+  ss << escaped;
+  ss << "}]";
+  processEvent(ss.str());
+} /* onInfoMsgReceived */
+
+
+/*
+ *----------------------------------------------------------------------------
  * Method:    onIsReceiving
  * Purpose:   Called by the EchoLink::Qso object to indicate whether the
  *    	      remote station is transmitting or not.
@@ -1162,7 +1262,8 @@ void ModuleEchoLink::onIsReceiving(bool is_receiving, QsoImpl *qso)
   //     << (is_receiving ? "TRUE" : "FALSE") << endl;
   
   stringstream ss;
-  ss << "is_receiving " << (is_receiving ? "1" : "0");
+  ss << "is_receiving " << (is_receiving ? "1" : "0")
+     << " " << qso->remoteCallsign();
   processEvent(ss.str());
 
   if ((talker == 0) && is_receiving)
@@ -1346,6 +1447,8 @@ void ModuleEchoLink::createOutgoingConnection(const StationData &station)
     qso->stateChange.connect(mem_fun(*this, &ModuleEchoLink::onStateChange));
     qso->chatMsgReceived.connect(
         mem_fun(*this, &ModuleEchoLink::onChatMsgReceived));
+    qso->infoMsgReceived.connect(
+        mem_fun(*this, &ModuleEchoLink::onInfoMsgReceived));
     qso->isReceiving.connect(mem_fun(*this, &ModuleEchoLink::onIsReceiving));
     qso->audioReceivedRaw.connect(
       	    mem_fun(*this, &ModuleEchoLink::audioFromRemoteRaw));
@@ -1424,7 +1527,7 @@ void ModuleEchoLink::broadcastTalkerStatus(void)
   }
   
   stringstream msg;
-  msg << "SvxLink " << SVXLINK_VERSION << " - " << mycall
+  msg << "SvxLink " << SVXLINK_APP_VERSION << " - " << mycall
       << " (" << numConnectedStations() << ")\n\n";
 
   if (squelch_is_open && listen_only_valve->isOpen())
@@ -1994,7 +2097,8 @@ bool ModuleEchoLink::numConCheck(const std::string &callsign)
     {
       time_t next = con_time.tv_sec + num_con_block_time;
       char time_str[64];
-      strftime(time_str, sizeof(time_str), "%c", localtime(&next));
+      struct tm tm;
+      strftime(time_str, sizeof(time_str), "%c", localtime_r(&next, &tm));
       cerr << "*** WARNING: Ingnoring incoming connection because "
            << "the station (" << callsign << ") has connected " 
            << "to often (" << stn.num_con << " times). " 
@@ -2074,6 +2178,92 @@ void ModuleEchoLink::replaceAll(std::string &str, const std::string &from,
   }
 } /* ModuleEchoLink::replaceAll */
 
+
+bool ModuleEchoLink::setRegex(regex_t*& regex, const std::string& cfg_tag,
+    const std::string& default_regex_str)
+{
+  std::string regex_str;
+  if (!cfg().getValue(cfgName(), cfg_tag, regex_str))
+  {
+    regex_str = default_regex_str;
+  }
+  delete regex;
+  regex = new regex_t;
+  int err = regcomp(regex, regex_str.c_str(),
+                    REG_EXTENDED | REG_NOSUB | REG_ICASE);
+  if (err != 0)
+  {
+    size_t msg_size = regerror(err, regex, 0, 0);
+    char msg[msg_size];
+    size_t err_size = regerror(err, regex, msg, msg_size);
+    assert(err_size == msg_size);
+    std::cerr << "*** ERROR: Syntax error in " << cfgName()
+              << "/" << cfg_tag << ": " << msg << std::endl;
+    return false;
+  }
+  return true;
+} /* ModuleEchoLink::setRegex */
+
+
+bool ModuleEchoLink::setDropIncomingRegex(void)
+{
+  return setRegex(drop_incoming_regex, CFG_DROP_INCOMING, "^$");
+} /* ModuleEchoLink::setDropIncomingRegex */
+
+
+bool ModuleEchoLink::setRejectIncomingRegex(void)
+{
+  return setRegex(reject_incoming_regex, CFG_REJECT_INCOMING, "^$");
+} /* ModuleEchoLink::setRejectIncomingRegex */
+
+
+bool ModuleEchoLink::setAcceptIncomingRegex(void)
+{
+  return setRegex(accept_incoming_regex, CFG_ACCEPT_INCOMING, "^.*$");
+} /* ModuleEchoLink::setAcceptIncomingRegex */
+
+
+bool ModuleEchoLink::setRejectOutgoingRegex(void)
+{
+  return setRegex(reject_outgoing_regex, CFG_REJECT_OUTGOING, "^$");
+} /* ModuleEchoLink::setRejectOutgoingRegex */
+
+
+bool ModuleEchoLink::setAcceptOutgoingRegex(void)
+{
+  return setRegex(accept_outgoing_regex, CFG_ACCEPT_OUTGOING, "^.*$");
+} /* ModuleEchoLink::setAcceptOutgoingRegex */
+
+
+void ModuleEchoLink::cfgValueUpdated(const std::string& section,
+    const std::string& tag)
+{
+  if (section != cfgName())
+  {
+    return;
+  }
+
+  if (tag == CFG_DROP_INCOMING)
+  {
+    setDropIncomingRegex();
+  }
+  else if (tag == CFG_REJECT_INCOMING)
+  {
+    setRejectIncomingRegex();
+  }
+  else if (tag == CFG_ACCEPT_INCOMING)
+  {
+    setAcceptIncomingRegex();
+  }
+  else if (tag == CFG_REJECT_OUTGOING)
+  {
+    setRejectOutgoingRegex();
+  }
+  else if (tag == CFG_ACCEPT_OUTGOING)
+  {
+    setAcceptOutgoingRegex();
+  }
+} /* ModuleEchoLink::cfgValueUpdated */
 
 
 /*

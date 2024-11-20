@@ -1,5 +1,45 @@
+/**
+@file	 siglevdetcal.cpp
+@brief   Signal level detector calibration utility
+@author  Tobias Blomberg / SM0SVX
+@date	 2008-03-30
+
+\verbatim
+SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
+Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+\endverbatim
+*/
+
+/****************************************************************************
+ *
+ * System Includes
+ *
+ ****************************************************************************/
+
 #include <iostream>
 #include <cstdlib>
+#include <map>
+
+
+/****************************************************************************
+ *
+ * Project Includes
+ *
+ ****************************************************************************/
 
 #include <AsyncCppApplication.h>
 #include <AsyncConfig.h>
@@ -9,13 +49,47 @@
 
 #include <LocalRxBase.h>
 
+
+/****************************************************************************
+ *
+ * Local Includes
+ *
+ ****************************************************************************/
+
 #include "version/SIGLEV_DET_CAL.h"
+
+
+/****************************************************************************
+ *
+ * Namespaces to use
+ *
+ ****************************************************************************/
 
 using namespace std;
 using namespace sigc;
 using namespace Async;
 
+
+/****************************************************************************
+ *
+ * Defines & typedefs
+ *
+ ****************************************************************************/
+
 #define PROGRAM_NAME "SigLevDetCal"
+
+struct CtcssMeasurement
+{
+  double sum = 0.0;
+  size_t count = 0;
+};
+
+
+/****************************************************************************
+ *
+ * Local Global Variables
+ *
+ ****************************************************************************/
 
 static const int INTERVAL = 100;
 static const int ITERATIONS = 150;
@@ -26,11 +100,16 @@ static double open_sum = 0.0f;
 static double close_sum = 0.0f;
 static float siglev_slope = 10.0;
 static float siglev_offset = 0.0;
-static double ctcss_snr_sum = 0.0;
-static unsigned ctcss_snr_cnt = 0;
-static float ctcss_open_snr = 0.0f;
-static float ctcss_close_snr = 0.0f;
+static std::map<float, CtcssMeasurement> ctcss_snr_sum;
+static std::map<float, float> ctcss_open_snr;
+static std::map<float, float> ctcss_close_snr;
 
+
+/****************************************************************************
+ *
+ * Local Functions
+ *
+ ****************************************************************************/
 
 #if 0
 void squelchOpen(bool is_open)
@@ -89,34 +168,48 @@ void sample_squelch_close(Timer *t)
 
     float new_siglev_slope = 100.0 / open_close_mean;
     float new_siglev_offset = -close_mean * new_siglev_slope;
-    if (ctcss_snr_cnt > 0)
+    for (const auto& entry : ctcss_snr_sum)
     {
-      ctcss_close_snr = ctcss_snr_sum / ctcss_snr_cnt;
+      ctcss_close_snr[entry.first] = entry.second.sum / entry.second.count;
     }
 
     cout << endl;
     cout << "--- Results\n";
-    printf("Mean SNR for the CTCSS tone              : ");
-    if (ctcss_snr_cnt > 0)
+    printf("Mean SNR for the CTCSS tones : ");
+    if (!ctcss_close_snr.empty())
     {
-      printf("%.1fdB\n",
-             ctcss_open_snr - ctcss_close_snr);
+      printf("\n");
+      for (const auto& entry : ctcss_close_snr)
+      {
+        float snr = ctcss_open_snr[entry.first] - entry.second;
+        printf("    %5.1f : %+5.1fdB\n", entry.first, snr);
+      }
     }
     else
     {
       printf("N/A (CTCSS not enabled)\n");
     }
-    printf("Dynamic range for the siglev measurement : %.1fdB\n",
-           10.0 * open_close_mean);
+    //printf("Dynamic range for the siglev measurement : %.1fdB\n",
+    //       10.0 * open_close_mean);
 
     cout << endl;
     cout << "--- Put the config variables below in the configuration file\n";
     cout << "--- section for " << rx->name() << ".\n";
     printf("SIGLEV_SLOPE=%.2f\n", new_siglev_slope);
     printf("SIGLEV_OFFSET=%.2f\n", new_siglev_offset);
-    if (ctcss_snr_cnt > 0)
+    if (!ctcss_close_snr.empty())
     {
-      printf("CTCSS_SNR_OFFSET=%.2f\n", ctcss_close_snr);
+      printf("CTCSS_SNR_OFFSETS=");
+      for (auto it = ctcss_close_snr.begin();
+           it != ctcss_close_snr.end(); ++it)
+      {
+        if (it->first != ctcss_close_snr.begin()->first)
+        {
+          printf(",");
+        }
+        printf("%.1f:%+.2f", it->first, it->second);
+      }
+      printf("\n");
     }
     cout << endl;
     
@@ -140,12 +233,9 @@ void start_squelch_close_measurement(FdWatch *w)
     cout << "--- Starting squelch close measurement\n";
     delete w;
 
-    ctcss_snr_sum = 0.0;
-    ctcss_snr_cnt = 0;
+    ctcss_snr_sum.clear();
 
     Timer *timer = new Timer(INTERVAL);
-    // must explicitly specify name space for ptr_fun() to avoid conflict
-    // with ptr_fun() in /usr/include/c++/4.5/bits/stl_function.h
     timer->expired.connect(sigc::ptr_fun(&sample_squelch_close));
   }
 } /* start_squelch_close_measurement */
@@ -163,9 +253,9 @@ void sample_squelch_open(Timer *t)
   {
     delete t;
     
-    if (ctcss_snr_cnt > 0)
+    for (const auto& entry : ctcss_snr_sum)
     {
-      ctcss_open_snr = ctcss_snr_sum / ctcss_snr_cnt;
+      ctcss_open_snr[entry.first] = entry.second.sum / entry.second.count;
     }
 
     FdWatch *w = new FdWatch(0, FdWatch::FD_WATCH_RD);
@@ -195,8 +285,7 @@ void start_squelch_open_measurement(FdWatch *w)
   {
     cout << "--- Starting squelch open measurement\n";
     delete w;
-    ctcss_snr_sum = 0.0;
-    ctcss_snr_cnt = 0;
+    ctcss_snr_sum.clear();
     Timer *timer = new Timer(INTERVAL);
     // must explicitly specify name space for ptr_fun() to avoid conflict
     // with ptr_fun() in /usr/include/c++/4.5/bits/stl_function.h
@@ -206,19 +295,26 @@ void start_squelch_open_measurement(FdWatch *w)
 } /* start_squelch_open_measurement */
 
 
-void ctcss_snr_updated(float snr)
+void ctcss_snr_updated(float snr, float fq)
 {
-  ctcss_snr_sum += snr;
-  ctcss_snr_cnt += 1;
+  auto& measurement = ctcss_snr_sum[fq];
+  measurement.sum += snr;
+  measurement.count += 1;
 }
 
+
+/****************************************************************************
+ *
+ * MAIN
+ *
+ ****************************************************************************/
 
 int main(int argc, char **argv)
 {
   CppApplication app;
   
   cout << PROGRAM_NAME " v" SIGLEV_DET_CAL_VERSION
-          " Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX\n\n";
+          " Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX\n\n";
   cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
           "This is free software, and you\n";
   cout << "are welcome to redistribute it in accordance with the "

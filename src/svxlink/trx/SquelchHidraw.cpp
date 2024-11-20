@@ -208,6 +208,10 @@ bool SquelchHidraw::initialize(Async::Config& cfg, const std::string& rx_name)
     {
       cout << "CM108A";
     }
+    else if (hiddevinfo.product == 0x0012)
+    {
+      cout << "CM108B";
+    }
     else if (hiddevinfo.product == 0x000e)
     {
       cout << "CM109";
@@ -265,14 +269,8 @@ void SquelchHidraw::hidrawActivity(FdWatch *watch)
     return;
   }
 
-  if (!signalDetected() && (buf[0] & pin))
-  {
-    setSignalDetected(active_low ^ true);
-  }
-  else if (signalDetected() && !(buf[0] & pin))
-  {
-    setSignalDetected(active_low ^ false);
-  }
+  bool pin_high = buf[0] & pin;
+  setSignalDetected(pin_high != active_low);
 } /* SquelchHidraw::hidrawActivity */
 
 

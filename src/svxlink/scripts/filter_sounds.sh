@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 ###############################################################################
 #
 # This is the filter_sounds.sh script which is used to process sound clips for
@@ -73,9 +73,15 @@ if [ $# -lt 2 ]; then
   print_usage_and_exit
 fi
 
-SRC_DIR=$1
-DEST_DIR=$2
+SRC_DIR=${1%/}
+DEST_DIR=${2%/}
 SILENCE_LEVEL=45
+
+# Check for requird external utilities
+if ! which sox &>/dev/null; then
+  echo "*** ERROR: The sox utility is not installed"
+  exit 1
+fi
 
 # Check if the filter_sounds.cfg config file exists and source it in if it does
 if [ ! -r "${SRC_DIR}/filter_sounds.cfg" ]; then
@@ -83,6 +89,10 @@ if [ ! -r "${SRC_DIR}/filter_sounds.cfg" ]; then
   print_usage_and_exit
 fi
 . "${SRC_DIR}/filter_sounds.cfg"
+
+EFFECT="${EFFECT:-}"
+MAXIMIZE_EFFECT="${MAXIMIZE_EFFECT:-$EFFECT}"
+TRIM_EFFECT="${TRIM_EFFECT:-$EFFECT}"
 
 # Check if the SUBDIRS config variable is set
 if [ -z "$SUBDIRS" ]; then
@@ -109,9 +119,12 @@ for subdir in $SUBDIRS; do
     [ ! -d $(dirname $dest_clip) ] && mkdir -p $(dirname $dest_clip)
     if [ -r "$src_clip.raw" -o -r "$src_clip.wav" ]; then
       echo "Maximizing $src_clip -> $dest_clip.$ext"
-      $basedir/play_sound.sh -f$endian$encoding -r$target_rate \
-			     -l$SILENCE_LEVEL -e "$EFFECT" "$src_clip" |
-	  sox ${SOX_RAW_SAMP_FMT} -r$target_rate - "$dest_clip.$ext"
+      $basedir/play_sound.sh -f$endian$encoding \
+                             -r$target_rate \
+                             -l$SILENCE_LEVEL \
+                             ${MAXIMIZE_EFFECT:+-e "$MAXIMIZE_EFFECT"} \
+                             "$src_clip" |
+          sox ${SOX_RAW_SAMP_FMT} -r$target_rate - "$dest_clip.$ext"
     else
       warning "Missing sound clip: $src_clip"
     fi
@@ -123,9 +136,12 @@ for subdir in $SUBDIRS; do
     [ ! -d $(dirname "$dest_clip") ] && mkdir -p $(dirname "$dest_clip")
     if [ -r "$src_clip.raw" -o -r "$src_clip.wav" ]; then
       echo "Trimming $src_clip -> $dest_clip.$ext"
-      $basedir/play_sound.sh -tf$endian$encoding -r$target_rate \
-			     -l$SILENCE_LEVEL -e "$EFFECT" "$src_clip" |
-	  sox ${SOX_RAW_SAMP_FMT} -r$target_rate - "$dest_clip.$ext"
+      $basedir/play_sound.sh -tf$endian$encoding \
+                             -r$target_rate \
+                             -l$SILENCE_LEVEL \
+                             ${TRIM_EFFECT:+-e "$TRIM_EFFECT"} \
+                             "$src_clip" |
+          sox ${SOX_RAW_SAMP_FMT} -r$target_rate - "$dest_clip.$ext"
       sox "$dest_clip.$ext" -r$target_rate ${SOX_RAW_SAMP_FMT} - >> /tmp/all_trimmed.raw
     else
       warning "Missing sound clip: $src_clip"

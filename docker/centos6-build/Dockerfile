@@ -3,7 +3,6 @@
 #
 # Run with:
 #   docker run -it --rm --hostname centos6-build \
-#              --privileged -v /dev/snd:/dev/snd \
 #              svxlink-centos6-build
 #
 # For using sound inside the docker container add:
@@ -31,7 +30,7 @@ RUN yum -y install epel-release && \
     yum -y install git sudo cmake gcc gcc-c++ libsigc++20-devel \
                    alsa-lib-devel speex-devel opus-devel qt-devel \
                    popt-devel libgcrypt-devel tcl-devel gsm-devel \
-                   doxygen alsa-utils wget tar bzip2 \
+                   libcurl-devel doxygen alsa-utils wget tar bzip2 \
                    vim-enhanced && \
     yum clean all
 
@@ -47,9 +46,9 @@ RUN mkdir -p /usr/share/svxlink/sounds && \
 ADD sudoers /etc/
 RUN chmod 0440 /etc/sudoers
 
-ENV GIT_URL https://github.com/sm0svx/svxlink.git \
-    GIT_BRANCH master \
-    NUM_CORES 1
+ENV GIT_URL=https://github.com/sm0svx/svxlink.git \
+    GIT_BRANCH=master \
+    NUM_CORES=1
 
 RUN useradd svxlink
 ADD build-svxlink.sh /home/svxlink/

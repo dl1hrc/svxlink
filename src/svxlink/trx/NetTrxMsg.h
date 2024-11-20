@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2018 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -50,6 +50,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <Modulation.h>
 #include <Tx.h>
 #include <Rx.h>
 
@@ -172,7 +173,7 @@ class MsgProtoVer : public Msg
   public:
     static const unsigned TYPE  = 0;
     static const uint16_t MAJOR = 2;
-    static const uint16_t MINOR = 4;
+    static const uint16_t MINOR = 8;
     MsgProtoVer(void)
       : Msg(TYPE, sizeof(MsgProtoVer)), m_major(MAJOR),
         m_minor(MINOR) {}
@@ -291,7 +292,7 @@ class MsgAudioCodecSelect : public Msg
     {
       memset(m_codec_name, 0, sizeof(m_codec_name));
       memset(m_options, 0, sizeof(m_options));
-      strncpy(m_codec_name, codec_name, sizeof(m_codec_name));
+      strncpy(m_codec_name, codec_name, sizeof(m_codec_name)-1);
       m_codec_name[sizeof(m_codec_name)-1] = 0;
     }
     
@@ -429,7 +430,6 @@ class MsgAudio : public Msg
 
 
 
-
 /******************************** RX Messages ********************************/
 
 class MsgSetMuteState : public Msg
@@ -476,24 +476,70 @@ class MsgReset : public Msg
 }; /* MsgReset */
 
 
+class MsgSetRxFq : public Msg
+{
+  public:
+    static const unsigned TYPE = 203;
+    MsgSetRxFq(unsigned fq)
+      : Msg(TYPE, sizeof(MsgSetRxFq)), m_fq(fq) {}
+    unsigned fq(void) const { return m_fq; }
+
+  private:
+    uint32_t  m_fq;
+
+}; /* MsgSetRxFq */
+
+
+class MsgSetRxModulation : public Msg
+{
+  public:
+    static const unsigned TYPE = 204;
+    MsgSetRxModulation(Modulation::Type mod)
+      : Msg(TYPE, sizeof(MsgSetRxModulation)), m_modulation(mod) {}
+    Modulation::Type modulation(void) const { return m_modulation; }
+
+  private:
+    Modulation::Type  m_modulation;
+
+}; /* MsgSetRxModulation */
+
+
 
 
 class MsgSquelch : public Msg
 {
   public:
     static const unsigned TYPE = 250;
-    MsgSquelch(bool is_open, float signal_strength, int sql_rx_id)
+    static const int MAX_ACTIVITY_INFO_LEN = 127;
+    MsgSquelch(bool is_open, float signal_strength, char sql_rx_id,
+               const std::string& sql_activity_info)
       : Msg(TYPE, sizeof(MsgSquelch)), m_is_open(is_open),
-      	m_signal_strength(signal_strength), m_sql_rx_id(sql_rx_id) {}
+        m_signal_strength(signal_strength), m_sql_rx_id(sql_rx_id)
+    {
+      std::memset(m_sql_activity_info, 0, MAX_ACTIVITY_INFO_LEN+1);
+      std::strncpy(m_sql_activity_info, sql_activity_info.data(),
+          MAX_ACTIVITY_INFO_LEN);
+    }
     bool isOpen(void) const { return m_is_open; }
     float signalStrength(void) const { return m_signal_strength; }
-    int sqlRxId(void) const { return m_sql_rx_id; }
-  
+    char sqlRxId(void) const { return m_sql_rx_id; }
+    std::string sqlActivityInfo(void) const
+    {
+      const char *end = reinterpret_cast<const char*>(
+          std::memchr(m_sql_activity_info, 0, MAX_ACTIVITY_INFO_LEN));
+      if (end == NULL)
+      {
+        end = m_sql_activity_info+MAX_ACTIVITY_INFO_LEN;
+      }
+      return std::string(m_sql_activity_info, end);
+    }
+
   private:
     bool  m_is_open;
     float m_signal_strength;
-    int   m_sql_rx_id;
-    
+    char  m_sql_rx_id;
+    char  m_sql_activity_info[MAX_ACTIVITY_INFO_LEN+1];
+
 }; /* MsgSquelch */
 
 
@@ -550,15 +596,15 @@ class MsgSiglevUpdate : public Msg
 {
   public:
     static const unsigned TYPE = 254;
-    MsgSiglevUpdate(float signal_strength, int sql_rx_id)
+    MsgSiglevUpdate(float signal_strength, char sql_rx_id)
       : Msg(TYPE, sizeof(MsgSiglevUpdate)), m_signal_strength(signal_strength),
         m_sql_rx_id(sql_rx_id) {}
     float signalStrength(void) const { return m_signal_strength; }
-    int sqlRxId(void) const { return m_sql_rx_id; }
+    char sqlRxId(void) const { return m_sql_rx_id; }
   
   private:
     float m_signal_strength;
-    int   m_sql_rx_id;
+    char  m_sql_rx_id;
     
 }; /* MsgSiglevUpdate */
 
@@ -599,17 +645,19 @@ class MsgSendDtmf : public Msg
   public:
     static const unsigned TYPE  = 302;
     static const int MAX_DIGITS = 256;
-    MsgSendDtmf(const std::string &digits)
-      : Msg(TYPE, sizeof(MsgSendDtmf))
+    MsgSendDtmf(const std::string &digits, unsigned duration)
+      : Msg(TYPE, sizeof(MsgSendDtmf)), m_duration(duration)
     {
       strncpy(m_digits, digits.c_str(), MAX_DIGITS);
       m_digits[MAX_DIGITS] = 0;
       setSize(size() - MAX_DIGITS + strlen(m_digits));
     }
     std::string digits(void) const { return m_digits; }
+    unsigned duration(void) const { return m_duration; }
   
   private:
-    char  m_digits[MAX_DIGITS+1];
+    unsigned m_duration;
+    char     m_digits[MAX_DIGITS+1];
     
 }; /* MsgSendDtmf */
 
@@ -622,6 +670,50 @@ class MsgFlush : public Msg
       : Msg(TYPE, sizeof(MsgFlush)) {}
 }; /* MsgFlush */
 
+
+class MsgTransmittedSignalStrength : public Msg
+{
+  public:
+    static const unsigned TYPE = 304;
+    MsgTransmittedSignalStrength(float signal_strength, char sql_rx_id)
+      : Msg(TYPE, sizeof(MsgTransmittedSignalStrength)),
+        m_signal_strength(signal_strength), m_sql_rx_id(sql_rx_id) {}
+    float signalStrength(void) const { return m_signal_strength; }
+    char sqlRxId(void) const { return m_sql_rx_id; }
+
+  private:
+    float m_signal_strength;
+    char  m_sql_rx_id;
+
+}; /* MsgTransmittedSignalStrength */
+
+
+class MsgSetTxFq : public Msg
+{
+  public:
+    static const unsigned TYPE = 305;
+    MsgSetTxFq(unsigned fq)
+      : Msg(TYPE, sizeof(MsgSetTxFq)), m_fq(fq) {}
+    unsigned fq(void) const { return m_fq; }
+
+  private:
+    uint32_t  m_fq;
+
+}; /* MsgSetTxFq */
+
+
+class MsgSetTxModulation : public Msg
+{
+  public:
+    static const unsigned TYPE = 306;
+    MsgSetTxModulation(Modulation::Type mod)
+      : Msg(TYPE, sizeof(MsgSetTxModulation)), m_modulation(mod) {}
+    Modulation::Type modulation(void) const { return m_modulation; }
+
+  private:
+    Modulation::Type  m_modulation;
+
+}; /* MsgSetTxModulation */
 
 
 
@@ -646,7 +738,7 @@ class MsgTransmitterStateChange : public Msg
   private:
     bool m_is_transmitting;
     
-}; /* MsgTxTimeout */
+}; /* MsgTransmitterStateChange */
 
 
 class MsgAllSamplesFlushed : public Msg
@@ -655,7 +747,7 @@ class MsgAllSamplesFlushed : public Msg
     static const unsigned TYPE = 352;
     MsgAllSamplesFlushed(void)
       : Msg(TYPE, sizeof(MsgAllSamplesFlushed)) {}
-}; /* MsgTxTimeout */
+}; /* MsgAllSamplesFlushed */
 
 
 #pragma pack(pop)

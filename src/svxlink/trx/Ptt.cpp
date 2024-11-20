@@ -57,6 +57,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #ifdef HAS_HIDRAW_SUPPORT
 #include "PttHidraw.h"
 #endif
+#ifdef HAS_GPIOD_SUPPORT
+#include "PttGpiod.h"
+#endif
 
 
 
@@ -141,7 +144,10 @@ Ptt *PttFactoryBase::createNamedPtt(Config& cfg, const string& name)
 #ifdef HAS_HIDRAW_SUPPORT
   PttHidraw::Factory hidraw_ptt_factory;
 #endif
-  
+#ifdef HAS_GPIOD_SUPPORT
+  PttGpiod::Factory gpiod_ptt_factory;
+#endif
+
   string ptt_type;
   if (!cfg.getValue(name, "PTT_TYPE", ptt_type) || ptt_type.empty())
   {

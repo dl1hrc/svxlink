@@ -75,6 +75,7 @@ namespace Async
   class AudioSplitter;
   class AudioValve;
   class AudioSelector;
+  class Pty;
 };
 namespace EchoLink
 {
@@ -138,7 +139,7 @@ class ModuleEchoLink : public Module
     ModuleEchoLink(void *dl_handle, Logic *logic, const std::string& cfg_name);
     ~ModuleEchoLink(void);
     bool initialize(void);
-    const char *compiledForVersion(void) const { return SVXLINK_VERSION; }
+    const char *compiledForVersion(void) const { return SVXLINK_APP_VERSION; }
 
     
   protected:
@@ -210,6 +211,8 @@ class ModuleEchoLink : public Module
     int   	      	  autocon_time;
     Async::Timer	  *autocon_timer;
     EchoLink::Proxy       *proxy;
+    Async::Pty            *pty;
+    std::string           command_buf;
 
     void moduleCleanup(void);
     void activateInit(void);
@@ -220,15 +223,19 @@ class ModuleEchoLink : public Module
     void squelchOpen(bool is_open);
     int audioFromRx(float *samples, int count);
     void allMsgsWritten(void);
+    void handlePtyCommand(const std::string &full_command);
+    void onCommandPtyInput(const void *buf, size_t count);
 
     void onStatusChanged(EchoLink::StationData::Status status);
     void onStationListUpdated(void);
     void onError(const std::string& msg);
+    void clientListChanged(void);
     void onIncomingConnection(const Async::IpAddress& ip,
       	    const std::string& callsign, const std::string& name,
       	    const std::string& priv);
     void onStateChange(QsoImpl *qso, EchoLink::Qso::State qso_state);
     void onChatMsgReceived(QsoImpl *qso, const std::string& msg);
+    void onInfoMsgReceived(QsoImpl *qso, const std::string& msg);
     void onIsReceiving(bool is_receiving, QsoImpl *qso);
     void destroyQsoObject(QsoImpl *qso);
 
@@ -259,6 +266,14 @@ class ModuleEchoLink : public Module
     void numConUpdate(void);
     void replaceAll(std::string &str, const std::string &from,
                     const std::string &to) const;
+    bool setRegex(regex_t*& regex, const std::string& cfg_tag,
+                  const std::string& default_regex_str);
+    bool setDropIncomingRegex(void);
+    bool setRejectIncomingRegex(void);
+    bool setAcceptIncomingRegex(void);
+    bool setRejectOutgoingRegex(void);
+    bool setAcceptOutgoingRegex(void);
+    void cfgValueUpdated(const std::string& section, const std::string& tag);
 
 };  /* class ModuleEchoLink */
 

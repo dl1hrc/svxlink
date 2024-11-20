@@ -118,6 +118,9 @@ will be interpreted as squelch close.
 class SquelchGpio : public Squelch
 {
   public:
+      /// The name of this class when used by the object factory
+    static constexpr const char* OBJNAME = "GPIO";
+
     /**
      * @brief 	Default constuctor
      */
@@ -142,6 +145,7 @@ class SquelchGpio : public Squelch
     int           fd;
     Async::Timer  *timer;
     bool          active_low;
+    std::string   gpio_path;
 
     SquelchGpio(const SquelchGpio&);
     SquelchGpio& operator=(const SquelchGpio&);

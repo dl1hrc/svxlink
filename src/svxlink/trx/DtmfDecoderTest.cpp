@@ -162,7 +162,7 @@ class PowerPlotter : public Async::AudioPassthrough
       double power = 0.0;
       for (int i=0; i<count; ++i)
       {
-        power += samples[i] * samples[i];
+        power += static_cast<double>(samples[i]) * samples[i];
       }
       power /= count;
       power = ALPHA * power + (1-ALPHA) * prev_power;
@@ -228,7 +228,7 @@ int main()
   prev_src->registerSink(fwriter, true);
   prev_src = fwriter;
 
-  DtmfDecoder *dec = DtmfDecoder::create(cfg, "Test");
+  DtmfDecoder *dec = DtmfDecoder::create(0, cfg, "Test");
   if (!dec->initialize())
   {
     cout << "*** ERROR: Could not initialize DTMF decoder\n";

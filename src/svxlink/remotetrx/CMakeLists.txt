@@ -11,17 +11,12 @@ include_directories(${GCRYPT_INCLUDE_DIRS})
 add_definitions(${GCRYPT_DEFINITIONS})
 
 # Add project libraries
-set(LIBS ${LIBS} trx asynccpp asyncaudio asynccore)
-
-# Add targets for version files
-set(VERSION_DEPENDS)
-add_version_target(REMOTE_TRX VERSION_DEPENDS)
+set(LIBS ${LIBS} trx asynccpp asyncaudio asynccore svxmisc)
 
 # Build the executable
 add_executable(remotetrx
   TrxHandler.cpp Uplink.cpp NetUplink.cpp RfUplink.cpp
   NetTrxAdapter.cpp remotetrx.cpp
-  ${VERSION_DEPENDS}
 )
 target_link_libraries(remotetrx ${LIBS})
 set_target_properties(remotetrx PROPERTIES

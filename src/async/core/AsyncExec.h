@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 \endverbatim
 */
 
-/** @example Exec_demo.cpp
+/** @example AsyncExec_demo.cpp
 An example of how to use the Exec class
 */
 
@@ -126,11 +126,13 @@ class.
 This class depends on the SIGCHLD UNIX signal so it must not be used by
 another part of the application.
 
-\include Exec_demo.cpp
+\include AsyncExec_demo.cpp
 */
 class Exec : public sigc::trackable
 {
   public:
+    using Environment = std::vector<std::pair<std::string,std::string>>;
+
     /**
      * @brief 	Default constructor
      */
@@ -163,6 +165,35 @@ class Exec : public sigc::trackable
      * @param   arg The command line argument to add
      */
     void appendArgument(const std::string &arg);
+
+    /**
+     * @brief   Clear the environment
+     *
+     * This function is used to clear the environment. It must be called before
+     * calling run(). It will clear both the environment inherited from the
+     * parent process as well as any environment variables added using the
+     * addEnvironmentVar(s) functions.
+     */
+    void clearEnvironment(void);
+
+    /**
+     * @brief   Add an additional environment variable
+     * @param   name The name of the environment variable
+     * @param   val  The value of the environment variable
+     *
+     * This function is used to add a variable to the environment for the
+     * process to be executed. It must be done before calling run().
+     */
+    void addEnvironmentVar(const std::string& name, const std::string& val);
+
+    /**
+     * @brief   Add multiple environment variables
+     * @param   env The environment variables to add
+     *
+     * This function is used to add multiple variables to the environment for
+     * the process to be executed. It must be done before calling run().
+     */
+    void addEnvironmentVars(const Environment& env);
 
     /**
      * @brief   Modify the nice value for the child subprocess
@@ -322,6 +353,7 @@ class Exec : public sigc::trackable
     static struct sigaction   old_sigact;
 
     std::vector<std::string>  args;
+    std::vector<std::string>  env;
     pid_t                     pid;
     Async::FdWatch            *stdout_watch;
     Async::FdWatch            *stderr_watch;
@@ -330,6 +362,7 @@ class Exec : public sigc::trackable
     int                       nice_value;
     Async::Timer              *timeout_timer;
     bool                      pending_term;
+    bool                      clear_env = false;
 
     static void handleSigChld(int signal_number, siginfo_t *info,
                               void *context);

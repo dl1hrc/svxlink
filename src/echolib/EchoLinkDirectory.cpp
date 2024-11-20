@@ -635,6 +635,12 @@ int Directory::handleCallList(char *buf, int len)
 	  get_call_list.clear();
 	  com_state = CS_IDLE;
 	  read_len = 3;
+
+          std::string errmsg("INCORRECT PASSWORD");
+          if (the_message.find(errmsg.c_str(), 0, errmsg.size()) == 0)
+          {
+            error_str = the_message;
+          }
 	}
 	else
 	{
@@ -688,9 +694,9 @@ void Directory::ctrlSockConnected(void)
     case Cmd::ONLINE:
     {
       time_t t = time(NULL);
-      struct tm *tm = localtime(&t);
+      struct tm tm;
       char local_time_str[6];
-      strftime(local_time_str, 6, "%H:%M", tm);
+      strftime(local_time_str, 6, "%H:%M", localtime_r(&t, &tm));
       cmdstr = "l" + the_callsign + "\254\254" + the_password +
 	  "\015ONLINE3.38(" + local_time_str + ")\015" + the_description +
 	  "\015";
@@ -700,9 +706,9 @@ void Directory::ctrlSockConnected(void)
     case Cmd::BUSY:
     {
       time_t t = time(NULL);
-      struct tm *tm = localtime(&t);
+      struct tm tm;
       char local_time_str[6];
-      strftime(local_time_str, 6, "%H:%M", tm);
+      strftime(local_time_str, 6, "%H:%M", localtime_r(&t, &tm));
       cmdstr = "l" + the_callsign + "\254\254" + the_password +
 	  "\015BUSY3.40(" + local_time_str + ")\015" + the_description + "\015";
       break;
@@ -825,11 +831,11 @@ void Directory::ctrlSockDisconnected(void)
 
   switch (reason)
   {
-    case Async::TcpClient::DR_HOST_NOT_FOUND:
+    case Async::TcpClient<>::DR_HOST_NOT_FOUND:
       error("EchoLink directory server DNS lookup failed\n");
       break;
     
-    case Async::TcpClient::DR_REMOTE_DISCONNECTED:
+    case Async::TcpClient<>::DR_REMOTE_DISCONNECTED:
       if (com_state != CS_IDLE)
       {
         error("The directory server closed the connection before all data was "
@@ -837,16 +843,12 @@ void Directory::ctrlSockDisconnected(void)
       }
       break;
       
-    case Async::TcpClient::DR_SYSTEM_ERROR:
+    case Async::TcpClient<>::DR_SYSTEM_ERROR:
       error(string("Directory server communications error: ")
             + strerror(errno));
       break;
-      
-    case Async::TcpClient::DR_RECV_BUFFER_OVERFLOW:
-      error("Directory server receiver buffer overflow!\n");
-      break;
-    
-    case Async::TcpClient::DR_ORDERED_DISCONNECT:
+
+    case Async::TcpClient<>::DR_ORDERED_DISCONNECT:
       break;
   }
   

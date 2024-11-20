@@ -16,7 +16,7 @@ set(FORMS MainWindowBase.ui ComDialogBase.ui SettingsDialogBase.ui)
 set(RESOURCES qtel.qrc)
 
 # Libraries
-set(LIBS ${LIBS} echolib asyncqt asyncaudio asynccore)
+set(LIBS ${LIBS} echolib asyncqt asyncaudio asynccore svxmisc)
 
 # Find the GSM codec library and include directory
 find_package(GSM REQUIRED)
@@ -56,11 +56,6 @@ endif()
 # to find automatically generated h-files.
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-# Add targets for version files
-set(VERSION_DEPENDS)
-string(TOUPPER ${PROG} PROG_VERNAME)
-add_version_target(${PROG_VERNAME} VERSION_DEPENDS)
-
 # Compile the application
 add_executable(${PROG} ${PRGSRC} ${QTHEADERS_MOC} ${FORMS_HEADERS}
   ${RESOURCES_RCC} ${VERSION_DEPENDS}
@@ -74,7 +69,8 @@ set_target_properties(${PROG} PROPERTIES
 install(TARGETS ${PROG} DESTINATION ${BIN_INSTALL_DIR})
 install(FILES connect.raw DESTINATION ${SHARE_INSTALL_PREFIX}/qtel/sounds)
 install(FILES qtel.desktop DESTINATION ${SHARE_INSTALL_PREFIX}/applications)
-install(FILES images/link.xpm DESTINATION ${SHARE_INSTALL_PREFIX}/icons)
+install(FILES images/qtel.png DESTINATION ${SHARE_INSTALL_PREFIX}/icons/hicolor/128x128/apps)
+install(FILES org.svxlink.Qtel.metainfo.xml DESTINATION ${SHARE_INSTALL_PREFIX}/metainfo)
 
 # Build the translations subdirectory
 add_subdirectory(translations)

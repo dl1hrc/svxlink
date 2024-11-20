@@ -116,7 +116,7 @@ namespace SvxLink
  * success.
  */
 template <typename ValueType>
-static bool setValueFromString(ValueType &val, const std::string &str)
+bool setValueFromString(ValueType &val, const std::string &str)
 {
   std::istringstream ss(str);
   ss >> std::noskipws >> val;
@@ -134,20 +134,12 @@ static bool setValueFromString(ValueType &val, const std::string &str)
  * @param   str The sting to set the value from
  * @returns Returns \em true if the operation succeeded or \em false if not
  *
- * This function is a specialization for std::string of the more general
- * template function. It just copies the incoming string to the outgoing value.
- * If streaming were to be used for strings, white space would be
- * unconditionally ignored.
+ * This function overload the more general template function when the value
+ * to be set is an std::string. It just copies the incoming string to the
+ * outgoing value. If streaming were to be used for strings, white space
+ * would be unconditionally ignored.
  */
-template <>
-#if defined(__GNUC__) && (__GNUC__ * 100 + __GNUC_MINOR__ < 403)
-static
-#endif
-bool setValueFromString(std::string &val, const std::string &str)
-{
-  val = str;
-  return true;
-} /* setValueFromString */
+bool setValueFromString(std::string &val, const std::string &str);
 
 
 /**
@@ -219,30 +211,36 @@ static typename Container::size_type splitStr(Container &L,
  * @param a The first type in the pair
  * @param b The second type in the pair
  * @param sep The character used to separate the two values (default colon)
- * @param endmark The character used to end the pair (default space)
  *
  * This class was created to make it easy to stream a pair type in or out.
  * For example, if we read the string "100.5:1000" from an input stream and
  * we declare the variable "SepPair<float, unsigned> my_pair", we can write
- * "input >> my_pair". Then we have my_pair.first == 100.5 and
+ * "is >> my_pair". Then we have my_pair.first == 100.5 and
  * my_pair.second == 1000.
  */
-template <typename a, typename b, char sep=':', char endmark=' '>
+template <typename a, typename b, char sep=':'>
 class SepPair : public std::pair<a, b>
 {
   public:
-    friend std::istream &operator>>(std::istream &input, SepPair &cp)
+    friend std::istream &operator>>(std::istream &is, SepPair &cp)
     {
-      std::string first, second;
-      getline(input, first, sep);
-      getline(input, second, endmark);
-      if (!setValueFromString(cp.first, first)
-          || !setValueFromString(cp.second, second))
+      std::string value;
+      is >> value;
+      std::string::size_type seppos = value.find(sep);
+      if (seppos == std::string::npos)
       {
-        input.setstate(std::ios_base::failbit);
+        is.setstate(std::ios_base::failbit);
+        return is;
       }
-      return input;            
-    }   
+      std::string first(value.substr(0, seppos));
+      std::string second(value.substr(seppos+1));
+      if (!setValueFromString(cp.first, first) ||
+          !setValueFromString(cp.second, second))
+      {
+        is.setstate(std::ios_base::failbit);
+      }
+      return is;
+    }
 
     friend std::ostream &operator<<(std::ostream &output, SepPair &cp)
     {

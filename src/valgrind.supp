@@ -10,6 +10,15 @@
    fun:main
 }
 {
+   gcry_check_version
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   ...
+   fun:gcry_check_version
+   ...
+}
+{
    dl_init
    Memcheck:Leak
    match-leak-kinds: reachable
@@ -82,4 +91,39 @@
    match-leak-kinds: reachable,possible
    ...
    fun:TclNREvalObjEx
+}
+{
+   TclpAlloc
+   Memcheck:Leak
+   match-leak-kinds: reachable,possible
+   fun:malloc
+   ...
+   fun:TclpAlloc
+   ...
+}
+{
+   Tcl_NewObj
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:Tcl_NewObj
+   ...
+}
+{
+   Tcl_NewStringObj
+   Memcheck:Leak
+   match-leak-kinds: reachable,possible
+   fun:malloc
+   ...
+   fun:Tcl_NewStringObj
+   ...
+}
+{
+   TclCompileExpr
+   Memcheck:Leak
+   match-leak-kinds: possible
+   ...
+   fun:TclThreadAllocObj
+   ...
 }

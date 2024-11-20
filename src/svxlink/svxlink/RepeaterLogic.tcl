@@ -31,7 +31,7 @@ variable repeater_is_up 0;
 proc startup {} {
   global logic_name;
   append func $logic_name "::checkPeriodicIdentify";
-  Logic::addTimerTickSubscriber $func;
+  Logic::addMinuteTickSubscriber $func;
   Logic::startup;
 }
 
@@ -187,6 +187,14 @@ proc squelch_open {rx_id is_open} {
 #
 proc every_minute {} {
   Logic::every_minute;
+}
+
+
+#
+# Executed once every second
+#
+proc every_second {} {
+  Logic::every_second;
 }
 
 
@@ -402,6 +410,37 @@ proc list_languages {} {
 #
 proc logic_online {online} {
   Logic::logic_online $online
+}
+
+
+#
+# Executed when a configuration variable is updated at runtime in the logic
+# core
+#
+proc config_updated {tag value} {
+  Logic::config_updated "$tag" "$value"
+}
+
+
+#
+# Executed when a DTMF command is received from another linked logic core
+#
+#   logic -- The name of the logic core
+#   cmd   -- The received command
+#
+proc remote_cmd_received {logic cmd} {
+  Logic::remote_cmd_received "$logic" "$cmd"
+}
+
+
+#
+# Executed when a talkgroup is received from another linked logic core
+#
+#   logic -- The name of the logic core
+#   tg    -- The received talkgroup
+#
+proc remote_received_tg_updated {logic tg} {
+  Logic::remote_received_tg_updated "$logic" "$tg"
 }
 
 

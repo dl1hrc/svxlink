@@ -10,7 +10,7 @@ the SvxLink core is running. It can also be a DDR (Digital Drop Receiver).
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2014 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -39,7 +39,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <iostream>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <json/json.h>
 
 
 /****************************************************************************
@@ -59,6 +61,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncAudioCompressor.h>
 #include <AsyncAudioFifo.h>
 #include <AsyncAudioStreamStateDetector.h>
+#include <AsyncAudioFsf.h>
 #include <AsyncUdpSocket.h>
 #include <common.h>
 
@@ -72,21 +75,16 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "SigLevDet.h"
 #include "DtmfDecoder.h"
 #include "ToneDetector.h"
-#include "SquelchVox.h"
 #include "SquelchCtcss.h"
-#include "SquelchSerial.h"
-#include "SquelchSigLev.h"
-#include "SquelchEvDev.h"
-#include "SquelchGpio.h"
 #include "LocalRxBase.h"
 #include "multirate_filter_coeff.h"
 #include "Sel5Decoder.h"
+#include "AfskDemodulator.h"
+#include "Synchronizer.h"
+#include "HdlcDeframer.h"
+#include "Tx.h"
 #include "Emphasis.h"
-#include "SquelchPty.h"
-#include "SquelchOpen.h"
-#ifdef HAS_HIDRAW_SUPPORT
-#include "SquelchHidraw.h"
-#endif
+#include "LADSPAPluginLoader.h"
 
 
 /****************************************************************************
@@ -106,9 +104,10 @@ using namespace Async;
  *
  ****************************************************************************/
 
-#define DTMF_MUTING_POST  200
-#define TONE_1750_MUTING_PRE 75
-#define TONE_1750_MUTING_POST 100
+#define DTMF_MUTING_POST        200
+#define TONE_1750_MUTING_PRE    75
+#define TONE_1750_MUTING_POST   100
+#define DEFAULT_LIMITER_THRESH  -1.0
 
 
 /****************************************************************************
@@ -138,7 +137,7 @@ class PeakMeter : public AudioPassthrough
       if (i < ret)
       {
       	cout << name
-	     << ": Distorsion detected! Please lower the input volume!\n";
+	     << ": Distortion detected! Please lower the input volume!\n";
       }
       
       return ret;
@@ -221,6 +220,10 @@ class AudioUdpSink : public UdpSocket, public AudioSink
  *
  ****************************************************************************/
 
+namespace {
+  typedef const char *CfgTag;
+  CfgTag CFG_SQL_EXTENDED_HANGTIME_THRESH = "SQL_EXTENDED_HANGTIME_THRESH";
+};
 
 
 /****************************************************************************
@@ -230,11 +233,12 @@ class AudioUdpSink : public UdpSocket, public AudioSink
  ****************************************************************************/
 
 LocalRxBase::LocalRxBase(Config &cfg, const std::string& name)
-  : Rx(cfg, name), cfg(cfg), mute_state(MUTE_ALL),
+  : Rx(cfg, name),
     squelch_det(0), siglevdet(0), /* siglev_offset(0.0), siglev_slope(1.0), */
     tone_dets(0), sql_valve(0), delay(0), sql_tail_elim(0),
     preamp_gain(0), mute_valve(0), sql_hangtime(0), sql_extended_hangtime(0),
-    sql_extended_hangtime_thresh(0), input_fifo(0), dtmf_muting_pre(0)
+    sql_extended_hangtime_thresh(0), input_fifo(0), dtmf_muting_pre(0),
+    ob_afsk_deframer(0), ib_afsk_deframer(0), audio_dev_keep_open(false)
 {
 } /* LocalRxBase::LocalRxBase */
 
@@ -243,6 +247,11 @@ LocalRxBase::~LocalRxBase(void)
 {
   clearHandler();
   delete input_fifo;  // This will delete the whole chain of audio objects
+  input_fifo = 0;
+  delete ob_afsk_deframer;
+  ob_afsk_deframer = 0;
+  delete ib_afsk_deframer;
+  ib_afsk_deframer = 0;
 } /* LocalRxBase::~LocalRxBase */
 
 
@@ -254,30 +263,37 @@ bool LocalRxBase::initialize(void)
   }
   
   bool deemphasis = false;
-  cfg.getValue(name(), "DEEMPHASIS", deemphasis);
+  cfg().getValue(name(), "DEEMPHASIS", deemphasis);
   
   int delay_line_len = 0;
   bool  mute_1750 = false;
-  if (cfg.getValue(name(), "1750_MUTING", mute_1750))
+  cfg().getValue(name(), "1750_MUTING", mute_1750);
+  if (mute_1750)
   {
     delay_line_len = max(delay_line_len, TONE_1750_MUTING_PRE);
   }
 
-  cfg.getValue(name(), "SQL_TAIL_ELIM", sql_tail_elim);
+  cfg().getValue(name(), "SQL_TAIL_ELIM", sql_tail_elim);
   if (sql_tail_elim > 0)
   {
     delay_line_len = max(delay_line_len, sql_tail_elim);
   }
   
-  cfg.getValue(name(), "PREAMP", preamp_gain);
+  cfg().getValue(name(), "PREAMP", preamp_gain);
   
   bool peak_meter = false;
-  cfg.getValue(name(), "PEAK_METER", peak_meter);
+  cfg().getValue(name(), "PEAK_METER", peak_meter);
   
     // Get the audio source object
   AudioSource *prev_src = audioSource();
   assert(prev_src != 0);
-  
+
+    // Valve used to mute the audio device on MUTE_ALL
+  mute_valve = new Async::AudioValve;
+  mute_valve->setOpen(false);
+  prev_src->registerSink(mute_valve, true);
+  prev_src = mute_valve;
+
     // Create a fifo buffer to handle large audio blocks
   input_fifo = new AudioFifo(1024);
 //  input_fifo->setOverwrite(true);
@@ -285,7 +301,7 @@ bool LocalRxBase::initialize(void)
   prev_src = input_fifo;
 
   SvxLink::SepPair<string, uint16_t> raw_audio_fwd_dest;
-  if (cfg.getValue(name(), "RAW_AUDIO_UDP_DEST", raw_audio_fwd_dest))
+  if (cfg().getValue(name(), "RAW_AUDIO_UDP_DEST", raw_audio_fwd_dest))
   {
     AudioSplitter *raw_audio_splitter = new AudioSplitter;
     prev_src->registerSink(raw_audio_splitter, true);
@@ -333,29 +349,26 @@ bool LocalRxBase::initialize(void)
   AudioSplitter *siglevdet_splitter = 0;
   siglevdet_splitter = new AudioSplitter;
   prev_src->registerSink(siglevdet_splitter, true);
+  prev_src = 0;
 
     // Create the signal level detector
-  siglevdet = SigLevDetFactoryBase::createNamedSigLevDet(cfg, name());
-  if ((siglevdet == 0) ||
-      (!siglevdet->initialize(cfg, name(), INTERNAL_SAMPLE_RATE)))
+  siglevdet = createSigLevDet(cfg(), name());
+  if (siglevdet == 0)
   {
-    cout << "*** ERROR: Could not initialize the signal level detector for "
-         << "receiver " << name() << endl;
-    delete siglevdet;
-    siglevdet = 0;
     return false;
   }
   siglevdet->setIntegrationTime(0);
   siglevdet->signalLevelUpdated.connect(
       mem_fun(*this, &LocalRxBase::onSignalLevelUpdated));
   siglevdet_splitter->addSink(siglevdet, true);
-  
-    // Create a mute valve
-  mute_valve = new AudioValve;
-  mute_valve->setOpen(true);
-  siglevdet_splitter->addSink(mute_valve, true);
-  prev_src = mute_valve;
-  
+  dataReceived.connect(mem_fun(siglevdet, &SigLevDet::frameReceived));
+
+    // Add a passthrough element to use as a connector between the splitter and
+    // the rest of the audio pipe
+  auto siglevdet_splitter_pass = new Async::AudioPassthrough;
+  siglevdet_splitter->addSink(siglevdet_splitter_pass, true);
+  prev_src = siglevdet_splitter_pass;
+
 #if (INTERNAL_SAMPLE_RATE != 16000)
     // If the sound card sample rate is higher than 8kHz (16 or 48kHz assumed)
     // decimate it down to 8kHz.
@@ -384,89 +397,125 @@ bool LocalRxBase::initialize(void)
   }
   
     // Create a splitter to distribute full bandwidth audio to all consumers
-  AudioSplitter *fullband_splitter = new AudioSplitter;
+  fullband_splitter = new AudioSplitter;
   prev_src->registerSink(fullband_splitter, true);
   prev_src = fullband_splitter;
 
     // Create the configured squelch detector and initialize it
   string sql_det_str;
-  if (!cfg.getValue(name(), "SQL_DET", sql_det_str))
+  if (!cfg().getValue(name(), "SQL_DET", sql_det_str))
   {
     cerr << "*** ERROR: Config variable " << name() << "/SQL_DET not set\n";
     return false;
   }
 
-  if (sql_det_str == "OPEN")
-  {
-    squelch_det = new SquelchOpen;
-  }
-  else if (sql_det_str == "VOX")
-  {
-    squelch_det = new SquelchVox;
-  }
-  else if (sql_det_str == "CTCSS")
-  {
-    SquelchCtcss *squelch_ctcss = new SquelchCtcss;
-    squelch_ctcss->snrUpdated.connect(ctcssSnrUpdated.make_slot());
-    squelch_det = squelch_ctcss;
-  }
-  else if (sql_det_str == "SERIAL")
-  {
-    squelch_det = new SquelchSerial;
-  }
-  else if (sql_det_str == "SIGLEV")
-  {
-    squelch_det = new SquelchSigLev(siglevdet);
-  }
-  else if (sql_det_str == "EVDEV")
-  {
-    squelch_det = new SquelchEvDev;
-  }
-  else if (sql_det_str == "GPIO")
-  {
-    squelch_det = new SquelchGpio;
-  }
-  else if (sql_det_str == "PTY")
-  {
-    squelch_det = new SquelchPty;
-  }
-#ifdef HAS_HIDRAW_SUPPORT
-  else if (sql_det_str == "HIDRAW")
-  {
-    squelch_det = new SquelchHidraw;
-  }
-#endif
-  else
+  squelch_det = createSquelch(sql_det_str);
+  if (squelch_det == 0)
   {
     cerr << "*** ERROR: Unknown squelch type specified in config variable "
-      	 << name() << "/SQL_DET. Legal values are: OPEN, VOX, CTCSS, SIGLEV, "
-	 << "EVDEV, GPIO, PTY and SERIAL\n";
+         << name() << "/SQL_DET. Legal squelch types are: "
+         << SquelchFactory::validFactories() << std::endl;
     // FIXME: Cleanup
     return false;
   }
-  
-  if (!squelch_det->initialize(cfg, name()))
+  if (!squelch_det->initialize(cfg(), name()))
   {
-    cerr << "*** ERROR: Squelch detector initialization failed for RX \""
-      	 << name() << "\"\n";
+    std::cerr << "*** ERROR: Squelch detector initialization failed for RX \""
+              << name() << "\"" << std::endl;
     delete squelch_det;
     squelch_det = 0;
     // FIXME: Cleanup
     return false;
   }
+  if (sql_det_str == SquelchCtcss::OBJNAME)
+  {
+    SquelchCtcss *squelch_ctcss = dynamic_cast<SquelchCtcss*>(squelch_det);
+    squelch_ctcss->snrUpdated.connect(ctcssSnrUpdated.make_slot());
+  }
 
   readyStateChanged.connect(mem_fun(*this, &LocalRxBase::rxReadyStateChanged));
 
-  if (cfg.getValue(name(), "SQL_HANGTIME", sql_hangtime))
-  {
-    squelch_det->setHangtime(sql_hangtime);
-  }
-  cfg.getValue(name(), "SQL_EXTENDED_HANGTIME", sql_extended_hangtime);
-  cfg.getValue(name(), "SQL_EXTENDED_HANGTIME_THRESH",
-      sql_extended_hangtime_thresh);
-  
+  cfg().getValue(name(), CFG_SQL_EXTENDED_HANGTIME_THRESH,
+                         sql_extended_hangtime_thresh);
+
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
+  squelch_det->toneDetected.connect(mem_fun(*this, &LocalRxBase::onToneDetected));
   fullband_splitter->addSink(squelch_det, true);
+
+  squelchOpen.connect(
+      sigc::hide(sigc::mem_fun(*this, &LocalRxBase::publishSquelchState)));
+
+    // Set up out of band AFSK demodulator if configured
+  float voice_gain = 0.0f;
+  bool ob_afsk_enable = false;
+  if (cfg().getValue(name(), "OB_AFSK_ENABLE", ob_afsk_enable) && ob_afsk_enable)
+  {
+    unsigned fc = 5500;
+    //cfg().getValue(name(), "OB_AFSK_CENTER_FQ", fc);
+    unsigned shift = 170;
+    //cfg().getValue(name(), "OB_AFSK_SHIFT", shift);
+    unsigned baudrate = 300;
+    //cfg().getValue(name(), "OB_AFSK_BAUDRATE", baudrate);
+    voice_gain = 6.0f;
+    cfg().getValue(name(), "OB_AFSK_VOICE_GAIN", voice_gain);
+
+      // Frequency sampling filter with passband center 5500Hz, about 400Hz
+      // wide and about 40dB stop band attenuation
+    const size_t N = 128;
+    float coeff[N/2+1];
+    memset(coeff, 0, sizeof(coeff));
+    coeff[42] = 0.39811024;
+    coeff[43] = 1.0;
+    coeff[44] = 1.0;
+    coeff[45] = 1.0;
+    coeff[46] = 0.39811024;
+    AudioFsf *fsf = new AudioFsf(N, coeff);
+    //prev_src->registerSink(fsf, true);
+    fullband_splitter->addSink(fsf, true);
+    AudioSource *prev_src = fsf;
+
+    AfskDemodulator *fsk_demod =
+      new AfskDemodulator(fc - shift/2, fc + shift/2, baudrate);
+    //fullband_splitter->addSink(fsk_demod, true);
+    prev_src->registerSink(fsk_demod, true);
+    prev_src = fsk_demod;
+
+    Synchronizer *sync = new Synchronizer(baudrate);
+    prev_src->registerSink(sync, true);
+    prev_src = 0;
+
+    ob_afsk_deframer = new HdlcDeframer;
+    ob_afsk_deframer->frameReceived.connect(
+        mem_fun(*this, &LocalRxBase::dataFrameReceived));
+    sync->bitsReceived.connect(
+        mem_fun(ob_afsk_deframer, &HdlcDeframer::bitsReceived));
+  }
+
+  bool ib_afsk_enable = false;
+  if (cfg().getValue(name(), "IB_AFSK_ENABLE", ib_afsk_enable) && ib_afsk_enable)
+  {
+    unsigned fc = 1700;
+    //cfg().getValue(name(), "IB_AFSK_CENTER_FQ", fc);
+    unsigned shift = 1000;
+    //cfg().getValue(name(), "IB_AFSK_SHIFT", shift);
+    unsigned baudrate = 1200;
+    //cfg().getValue(name(), "IB_AFSK_BAUDRATE", baudrate);
+
+    AfskDemodulator *fsk_demod =
+      new AfskDemodulator(fc - shift/2, fc + shift/2, baudrate);
+    fullband_splitter->addSink(fsk_demod, true);
+    AudioSource *prev_src = fsk_demod;
+
+    Synchronizer *sync = new Synchronizer(baudrate);
+    prev_src->registerSink(sync, true);
+    prev_src = 0;
+
+    ib_afsk_deframer = new HdlcDeframer;
+    ib_afsk_deframer->frameReceived.connect(
+        mem_fun(*this, &LocalRxBase::dataFrameReceivedIb));
+    sync->bitsReceived.connect(
+        mem_fun(ib_afsk_deframer, &HdlcDeframer::bitsReceived));
+  }
 
     // Create a new audio splitter to handle tone detectors
   tone_dets = new AudioSplitter;
@@ -476,9 +525,9 @@ bool LocalRxBase::initialize(void)
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
 #if (INTERNAL_SAMPLE_RATE == 16000)
-  AudioFilter *voiceband_filter = new AudioFilter("BpCh10/-0.1/300-5000");
+  AudioFilter *voiceband_filter = new AudioFilter("BpCh12/-0.1/300-5000");
 #else
-  AudioFilter *voiceband_filter = new AudioFilter("BpCh10/-0.1/300-3500");
+  AudioFilter *voiceband_filter = new AudioFilter("BpCh12/-0.1/300-3500");
 #endif
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
@@ -491,10 +540,10 @@ bool LocalRxBase::initialize(void)
 
     // Create the configured type of DTMF decoder and add it to the splitter
   string dtmf_dec_type("NONE");
-  cfg.getValue(name(), "DTMF_DEC_TYPE", dtmf_dec_type);
+  cfg().getValue(name(), "DTMF_DEC_TYPE", dtmf_dec_type);
   if (dtmf_dec_type != "NONE")
   {
-    DtmfDecoder *dtmf_dec = DtmfDecoder::create(cfg, name());
+    DtmfDecoder *dtmf_dec = DtmfDecoder::create(this, cfg(), name());
     if ((dtmf_dec == 0) || !dtmf_dec->initialize())
     {
       // FIXME: Cleanup?
@@ -508,7 +557,7 @@ bool LocalRxBase::initialize(void)
     voiceband_splitter->addSink(dtmf_dec, true);
 
     bool dtmf_muting = false;
-    cfg.getValue(name(), "DTMF_MUTING", dtmf_muting);
+    cfg().getValue(name(), "DTMF_MUTING", dtmf_muting);
     if (dtmf_muting)
     {
       dtmf_muting_pre = dtmf_dec->detectionTime();
@@ -518,10 +567,10 @@ bool LocalRxBase::initialize(void)
   
     // Create a selective multiple tone detector object
   string sel5_dec_type("NONE");
-  cfg.getValue(name(), "SEL5_DEC_TYPE", sel5_dec_type);
+  cfg().getValue(name(), "SEL5_DEC_TYPE", sel5_dec_type);
   if (sel5_dec_type != "NONE")
   {
-    Sel5Decoder *sel5_dec = Sel5Decoder::create(cfg, name());
+    Sel5Decoder *sel5_dec = Sel5Decoder::create(cfg(), name());
     if (sel5_dec == 0 || !sel5_dec->initialize())
     {
       cerr << "*** ERROR: Sel5 decoder initialization failed for RX \""
@@ -550,20 +599,39 @@ bool LocalRxBase::initialize(void)
     // elimination), create it
   if (delay_line_len > 0)
   {
+    std::cout << name() << ": Delay line (for DTMF muting etc) set to "
+              << delay_line_len << " ms" << std::endl;
     delay = new AudioDelayLine(delay_line_len);
     prev_src->registerSink(delay, true);
     prev_src = delay;
   }
 
-    // Add a limiter to smoothly limiting the audio before hard clipping it
-  AudioCompressor *limit = new AudioCompressor;
-  limit->setThreshold(-1);
-  limit->setRatio(0.1);
-  limit->setAttack(2);
-  limit->setDecay(20);
-  limit->setOutputGain(1);
-  prev_src->registerSink(limit, true);
-  prev_src = limit;
+  LADSPAPluginLoader ladspa_plug_loader;
+  if (!ladspa_plug_loader.load(cfg(), name()))
+  {
+    delete ladspa_plug_loader.chainSink();
+    return false;
+  }
+  if (ladspa_plug_loader.chainSink() != nullptr)
+  {
+    prev_src->registerSink(ladspa_plug_loader.chainSink(), true);
+    prev_src = ladspa_plug_loader.chainSource();
+  }
+
+    // Add a limiter to smoothly limit the audio before hard clipping it
+  double limiter_thresh = DEFAULT_LIMITER_THRESH;
+  cfg().getValue(name(), "LIMITER_THRESH", limiter_thresh);
+  if (limiter_thresh != 0.0)
+  {
+    AudioCompressor *limit = new AudioCompressor;
+    limit->setThreshold(limiter_thresh);
+    limit->setRatio(0.1);
+    limit->setAttack(2);
+    limit->setDecay(20);
+    limit->setOutputGain(1);
+    prev_src->registerSink(limit, true);
+    prev_src = limit;
+  }
 
     // Clip audio to limit its amplitude
   AudioClipper *clipper = new AudioClipper;
@@ -582,8 +650,10 @@ bool LocalRxBase::initialize(void)
   
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
-  setHandler(prev_src);
+  setAudioSourceHandler(prev_src);
   
+  cfg().getValue(name(), "AUDIO_DEV_KEEP_OPEN", audio_dev_keep_open);
+
     // Open the audio device for reading
   if (!audioOpen())
   {
@@ -601,13 +671,22 @@ bool LocalRxBase::initialize(void)
     //cout << "### Enabling 1750Hz muting\n";
   }
 
+  cfg().valueUpdated.connect(sigc::mem_fun(*this, &LocalRxBase::cfgUpdated));
+
   return true;
-  
+
 } /* LocalRxBase:initialize */
 
 
 void LocalRxBase::setMuteState(MuteState new_mute_state)
 {
+  auto mute_state = muteState();
+
+  //std::cout << "### LocalRxBase::setMuteState[" << name()
+  //          << "]: new_mute_state=" << new_mute_state
+  //          << " mute_state=" << mute_state
+  //          << std::endl;
+
   while (mute_state != new_mute_state)
   {
     assert((mute_state >= MUTE_NONE) && (mute_state <= MUTE_ALL));
@@ -626,11 +705,16 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
           break;
 
         case MUTE_ALL:  // MUTE_CONTENT -> MUTE_ALL
-          audioClose();
+          mute_valve->setOpen(false);
+          if (!audio_dev_keep_open)
+          {
+            audioClose();
+          }
           squelch_det->reset();
-          setSquelchState(false);
+          siglevdet->reset();
+          setSquelchState(false, "MUTED");
           break;
-         
+
         default:
           break;
       }
@@ -641,25 +725,29 @@ void LocalRxBase::setMuteState(MuteState new_mute_state)
       switch (mute_state)
       {
         case MUTE_CONTENT:  // MUTE_ALL -> MUTE_CONTENT
+          mute_valve->setOpen(true);
           if (!audioOpen())
           {
+            Rx::setMuteState(MUTE_ALL);
             return;
           }
-          squelch_det->reset();
+          squelch_det->restart();
           break;
 
         case MUTE_NONE:   // MUTE_CONTENT -> MUTE_NONE
+          //mute_valve->setOpen(true);
           if (squelchIsOpen())
           {
             sql_valve->setOpen(true);
           }
           break;
-         
+
         default:
           break;
       }
     }
   }
+  Rx::setMuteState(mute_state);
 } /* LocalRxBase::setMuteState */
 
 
@@ -668,10 +756,12 @@ bool LocalRxBase::addToneDetector(float fq, int bw, float thresh,
 {
   //printf("Adding tone detector with fq=%d  bw=%d  req_dur=%d\n",
   //    	 fq, bw, required_duration);
-  ToneDetector *det = new ToneDetector(fq, bw, required_duration);
+  ToneDetector *det = new ToneDetector(fq, 2*bw, required_duration);
   assert(det != 0);
   det->setPeakThresh(thresh);
-  det->detected.connect(toneDetected.make_slot());
+  det->setDetectOverlapPercent(75);
+  det->setDetectToneFrequencyTolerancePercent(50.0f * bw / fq);
+  det->detected.connect(sigc::mem_fun(*this, &LocalRxBase::onToneDetected));
   
   tone_dets->addSink(det, true);
   
@@ -690,6 +780,12 @@ float LocalRxBase::signalStrength(void) const
 } /* LocalRxBase::signalStrength */
     
 
+char LocalRxBase::sqlRxId(void) const
+{
+  return siglevdet->lastRxId();
+} /* LocalRxBase::sqlRxId */
+
+
 void LocalRxBase::reset(void)
 {
   setMuteState(Rx::MUTE_ALL);
@@ -700,6 +796,17 @@ void LocalRxBase::reset(void)
   }
 } /* LocalRxBase::reset */
 
+
+void LocalRxBase::registerFullbandSink(Async::AudioSink* sink)
+{
+  fullband_splitter->addSink(sink);
+} /* LocalRxBase::registerFullbandSink */
+
+
+void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
+{
+  fullband_splitter->removeSink(sink);
+} /* LocalRxBase::unregisterFullbandSink */
 
 
 /****************************************************************************
@@ -718,7 +825,7 @@ void LocalRxBase::reset(void)
 
 void LocalRxBase::sel5Detected(std::string sequence)
 {
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     selcallSequenceDetected(sequence);
   }
@@ -738,7 +845,7 @@ void LocalRxBase::dtmfDigitActivated(char digit)
 void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
 {
   //printf("DTMF digit %c deactivated. Duration = %d ms\n", digit, duration_ms);
-  if (mute_state == MUTE_NONE)
+  if (muteState() == MUTE_NONE)
   {
     dtmfDigitDetected(digit, duration_ms);
   }
@@ -746,21 +853,61 @@ void LocalRxBase::dtmfDigitDeactivated(char digit, int duration_ms)
   {
     delay->mute(false, DTMF_MUTING_POST);
   }
-} /* LocalRxBase::dtmfDigitActivated */
+} /* LocalRxBase::dtmfDigitDeactivated */
+
+
+void LocalRxBase::onToneDetected(float fq)
+{
+  if (muteState() == MUTE_NONE)
+  {
+    toneDetected(fq);
+  }
+} /* LocalRxBase::onToneDetected */
+
+
+void LocalRxBase::dataFrameReceived(vector<uint8_t> frame)
+{
+  vector<uint8_t>::const_iterator it = frame.begin();
+  if ((frame.size() == 5) && (*it++ == Tx::DATA_CMD_TONE_DETECTED))
+  {
+    float fq = 0.0f;
+    uint8_t *fq_ptr = reinterpret_cast<uint8_t*>(&fq);
+    *fq_ptr++ = *it++;
+    *fq_ptr++ = *it++;
+    *fq_ptr++ = *it++;
+    *fq_ptr++ = *it++;
+    cout << "### LocalRxBase::dataFrameReceived: len=" << frame.size()
+         << " cmd=" << Tx::DATA_CMD_TONE_DETECTED
+         << " fq=" << fq
+         << endl;
+    if (muteState() == MUTE_NONE)
+    {
+      toneDetected(fq);
+    }
+  }
+  dataReceived(frame);
+} /* LocalRxBase::dataFrameReceived */
+
+
+void LocalRxBase::dataFrameReceivedIb(vector<uint8_t> frame)
+{
+  cout << "### Inband data frame received: len=" << frame.size() << endl;
+  dataFrameReceived(frame);
+} /* LocalRxBase::dataFrameReceived */
 
 
 void LocalRxBase::audioStreamStateChange(bool is_active, bool is_idle)
 {
   if (is_idle && !squelch_det->isOpen())
   {
-    setSquelchState(false);
+    setSquelchState(false, squelch_det->activityInfo());
   }
 } /* LocalRxBase::audioStreamStateChange */
 
 
 void LocalRxBase::onSquelchOpen(bool is_open)
 {
-  if (mute_state == MUTE_ALL)
+  if (muteState() == MUTE_ALL)
   {
     return;
   }
@@ -771,8 +918,8 @@ void LocalRxBase::onSquelchOpen(bool is_open)
     {
       delay->clear();
     }
-    setSquelchState(true);
-    if (mute_state == MUTE_NONE)
+    setSquelchState(true, squelch_det->activityInfo());
+    if (muteState() == MUTE_NONE)
     {
       sql_valve->setOpen(true);
     }
@@ -788,7 +935,7 @@ void LocalRxBase::onSquelchOpen(bool is_open)
     }
     if (!sql_valve->isOpen())
     {
-      setSquelchState(false);
+      setSquelchState(false, squelch_det->activityInfo());
     }
     else
     {
@@ -818,6 +965,7 @@ void LocalRxBase::onSignalLevelUpdated(float siglev)
 {
   setSqlHangtimeFromSiglev(siglev);
   signalLevelUpdated(siglev);
+  publishSquelchState();
 } /* LocalRxBase::onSignalLevelUpdated */
 
 
@@ -825,14 +973,9 @@ void LocalRxBase::setSqlHangtimeFromSiglev(float siglev)
 {
   if (sql_extended_hangtime_thresh > 0)
   {
-    if ((siglev > sql_extended_hangtime_thresh) || (mute_state != MUTE_NONE))
-    {
-      squelch_det->setHangtime(sql_hangtime);
-    }
-    else
-    {
-      squelch_det->setHangtime(sql_extended_hangtime);
-    }
+    squelch_det->enableExtendedHangtime(
+        ((siglev < sql_extended_hangtime_thresh) &&
+         (muteState() == MUTE_NONE)));
   }
 } /* LocalRxBase::setSqlHangtime */
 
@@ -848,6 +991,45 @@ void LocalRxBase::rxReadyStateChanged(void)
   }
 } /* LocalRxBase::rxReadyStateChanged */
 
+
+void LocalRxBase::publishSquelchState(void)
+{
+  //std::cout << "### LocalRxBase::publishSquelchState: " << std::endl;
+  float siglev = signalStrength();
+  Json::Value rx(Json::objectValue);
+  rx["name"] = name();
+  char rx_id = sqlRxId();
+  rx["id"] = std::string(&rx_id, &rx_id+1);
+  rx["sql_open"] = squelchIsOpen();
+  rx["siglev"] = static_cast<int>(siglev);
+  Json::StreamWriterBuilder builder;
+  builder["commentStyle"] = "None";
+  builder["indentation"] = ""; //The JSON document is written on a single line
+  Json::StreamWriter* writer = builder.newStreamWriter();
+  stringstream os;
+  writer->write(rx, &os);
+  delete writer;
+  publishStateEvent("Rx:sql_state", os.str());
+} /* LocalRxBase::publishSquelchState */
+
+
+void LocalRxBase::cfgUpdated(const std::string& section, const std::string& tag)
+{
+  //std::cout << "### LocalRxBase::cfgUpdated: "
+  //          << section << "/" << tag << "=" << cfg().getValue(section, tag)
+  //          << std::endl;
+  if (section == name())
+  {
+    if (tag == CFG_SQL_EXTENDED_HANGTIME_THRESH)
+    {
+      cfg().getValue(name(), CFG_SQL_EXTENDED_HANGTIME_THRESH,
+                     sql_extended_hangtime_thresh);
+      std::cout << "Setting " << CFG_SQL_EXTENDED_HANGTIME_THRESH << " to "
+                << sql_extended_hangtime_thresh
+                << " for receiver " << name() << std::endl;
+    }
+  }
+} /* LocalRxBase::cfgUpdated */
 
 
 /*

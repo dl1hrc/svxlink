@@ -125,7 +125,6 @@ using namespace Async;
 
 Config::~Config(void)
 {
-  //fclose(file);
 } /* Config::~Config */
 
 
@@ -133,19 +132,19 @@ bool Config::open(const string& name)
 {
   errno = 0;
 
-  file = fopen(name.c_str(), "r");
+  FILE *file = fopen(name.c_str(), "r");
   if (file == NULL)
   {
     return false;
   }
-  
-  bool success = parseCfgFile();
-  
+
+  bool success = parseCfgFile(file);
+
   fclose(file);
   file = NULL;
-  
+
   return success;
-  
+
 } /* Config::open */
 
 
@@ -164,7 +163,7 @@ bool Config::getValue(const string& section, const string& tag,
     return false;
   }
 
-  value = val_it->second;
+  value = val_it->second.val;
   return true;
 } /* Config::getValue */
 
@@ -185,9 +184,19 @@ const string &Config::getValue(const string& section, const string& tag) const
     return empty_strng;
   }
 
-  return val_it->second;
-  
+  return val_it->second.val;
 } /* Config::getValue */
+
+
+list<string> Config::listSections(void)
+{
+  list<string> section_list;
+  for (Sections::const_iterator it=sections.begin(); it!=sections.end(); ++it)
+  {
+    section_list.push_back((*it).first);
+  }
+  return section_list;
+} /* Config::listSections */
 
 
 list<string> Config::listSection(const string& section)
@@ -199,7 +208,7 @@ list<string> Config::listSection(const string& section)
     return tags;
   }
   
-  Values& values = sections[section];  
+  Values& values = sections[section];
   Values::iterator it = values.begin();
   for (it=values.begin(); it!=values.end(); ++it)
   {
@@ -212,12 +221,19 @@ list<string> Config::listSection(const string& section)
 
 
 void Config::setValue(const std::string& section, const std::string& tag,
-      	      	      const std::string& value)
+                      const std::string& value)
 {
   Values &values = sections[section];
-  values[tag] = value;
+  if (value != values[tag].val)
+  {
+    values[tag].val = value;
+    valueUpdated(section, tag);
+    for (const auto& func : values[tag].subs)
+    {
+      func(value);
+    }
+  }
 } /* Config::setValue */
-
 
 
 /****************************************************************************
@@ -264,7 +280,7 @@ void Config::setValue(const std::string& section, const std::string& tag,
  * Bugs:      
  *----------------------------------------------------------------------------
  */
-bool Config::parseCfgFile(void)
+bool Config::parseCfgFile(FILE *file)
 {
   char line[16384];
   int line_no = 0;
@@ -325,7 +341,7 @@ bool Config::parseCfgFile(void)
 	assert(!current_sec.empty());
 	
 	Values &values = sections[current_sec];
-	string& value = values[current_tag];
+	string& value = values[current_tag].val;
 	value += val;
 	break;
       }
@@ -349,7 +365,7 @@ bool Config::parseCfgFile(void)
 	}
 	Values &values = sections[current_sec];
 	current_tag = tag;
-	values[current_tag] = value;
+	values[current_tag].val = value;
       	break;
       }
     }
@@ -502,9 +518,6 @@ char *Config::translateEscapedChars(char *val)
 } /* Config::translateEscapedChars */
 
 
-
-
 /*
  * This file has not been truncated
  */
-

@@ -49,7 +49,7 @@ using namespace Async;
 Module::Module(void *dl_handle, Logic *logic, const string& cfg_name)
   : m_dl_handle(dl_handle), m_logic(logic), m_id(-1), m_name(cfg_name),
     m_is_transmitting(false), m_is_active(false), m_cfg_name(cfg_name),
-    m_tmo_timer(0)
+    m_tmo_timer(0), m_mute_linking(true)
 {
   
 } /* Module::Module */
@@ -63,23 +63,15 @@ Module::~Module(void)
 
 bool Module::initialize(void)
 {
-  if (strcmp(compiledForVersion(), SVXLINK_VERSION) != 0)
+  if (strcmp(compiledForVersion(), SVXLINK_APP_VERSION) != 0)
   {
     cerr << "*** ERROR: This module is compiled for version "
          << compiledForVersion() << " of SvxLink but the running version "
-         << "of the SvxLink core is " << SVXLINK_VERSION << ".\n";
+         << "of the SvxLink core is " << SVXLINK_APP_VERSION << ".\n";
     return false;
   }
 
-  string id_str;
-  if (!cfg().getValue(cfgName(), "ID", id_str))
-  {
-    cerr << "*** ERROR: Config variable " << cfgName()
-      	 << "/ID not set\n";
-    return false;
-  }
-  m_id = atoi(id_str.c_str());
-
+  cfg().getValue(cfgName(), "ID", m_id);
   cfg().getValue(cfgName(), "NAME", m_name);
   
   string timeout_str;
@@ -89,7 +81,9 @@ bool Module::initialize(void)
     m_tmo_timer->setEnable(false);
     m_tmo_timer->expired.connect(mem_fun(*this, &Module::moduleTimeout));
   }
-  
+
+  cfg().getValue(cfgName(), "MUTE_LOGIC_LINKING", m_mute_linking);
+
   list<string> vars = cfg().listSection(cfgName());
   list<string>::const_iterator cfgit;
   for (cfgit=vars.begin(); cfgit!=vars.end(); ++cfgit)
@@ -99,7 +93,9 @@ bool Module::initialize(void)
     cfg().getValue(cfgName(), *cfgit, value);
     setEventVariable(var, value);
   }
-  
+
+  cfg().valueUpdated.connect(sigc::mem_fun(*this, &Module::cfgUpdated));
+
   return true;
   
 } /* Module::initialize */
@@ -120,7 +116,8 @@ void Module::activate(void)
 
   m_logic_idle_con = logic()->idleStateChanged.connect(
       mem_fun(*this, &Module::logicIdleStateChanged));
-  
+
+  m_logic->setMuteLinking(m_mute_linking);
   setIdle(logic()->isIdle());
   activateInit();
 }
@@ -141,6 +138,7 @@ void Module::deactivate(void)
   m_is_active = false;
 
   setIdle(true);
+  m_logic->setMuteLinking(false);
 }
 
 
@@ -274,6 +272,20 @@ bool Module::squelchIsOpen(void)
 } /* Module::squelchIsOpen */
 
 
+void Module::cfgUpdated(const std::string& section, const std::string& tag)
+{
+  if (section == cfgName())
+  {
+    std::string value;
+    if (cfg().getValue(cfgName(), tag, value))
+    {
+      setEventVariable(name() + "::CFG_" + tag, value);
+      processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
+    }
+  }
+} /* Module::cfgUpdated */
+
+
 bool Module::isWritingMessage(void)
 {
   return logic()->isWritingMessage();
@@ -288,4 +300,6 @@ void Module::moduleTimeout(Timer *t)
 } /* ModuleParrot::moduleTimeout */
 
 
-
+/*
+ * This file has not been truncated
+ */

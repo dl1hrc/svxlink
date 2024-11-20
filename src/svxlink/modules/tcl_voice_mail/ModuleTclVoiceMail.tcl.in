@@ -45,10 +45,18 @@ set state "idle";
 set recdir "@SVX_SPOOL_INSTALL_DIR@/voice_mail";
 
 #
+# The default mail server
+#
+set mail_smtp_url "smtp://127.0.0.1:25";
+
+#
 # Configuration file names
 #
 set cfg_etc "@SVX_SYSCONF_INSTALL_DIR@/TclVoiceMail.conf";
-set cfg_home "$env(HOME)/.svxlink/TclVoiceMail.conf";
+set cfg_home ""
+if {[info exists ::env(HOME)]} {
+  set cfg_home "$env(HOME)/.svxlink/TclVoiceMail.conf";
+}
 
 
 #
@@ -85,12 +93,17 @@ proc processEvent {ev} {
 #
 # Read configuration file
 #
-if [file exists $cfg_home] {
+if {$cfg_home != "" && [file exists $cfg_home]} {
   source $cfg_home;
 } elseif [file exists $cfg_etc] {
   source $cfg_etc;
 } else {
-  printInfo "*** ERROR: Could not find a configuration file in module \"$module_name\". Tried \"$cfg_home\" and \"$cfg_etc\"";
+  set info_str "*** ERROR: Could not find a configuration file in module \"$module_name\". Tried"
+  if {$cfg_home != ""} {
+    set info_str "$info_str \"$cfg_home\" and"
+  }
+  set info_str "$info_str \"$cfg_etc\""
+  printInfo "$info_str"
   exit 1;
 }
 
@@ -217,6 +230,7 @@ proc squelchOpen {is_open} {
   variable rec_rcpt;
   variable rec_timestamp;
   variable userid;
+  variable mail_smtp_url;
   variable mail_from_addr;
   variable mail_from_name;
   variable mail_subj;
@@ -259,6 +273,7 @@ proc squelchOpen {is_open} {
       	exec mutt -s "$mail_subj" $email \
 		-e "set from=\"$mail_from_addr\"" \
 		-e "set realname=\"$mail_from_name\"" \
+                -e "set smtp_url=\"$mail_smtp_url\"" \
 		<< "$msg" &;
       }
       set rec_rcpt "";

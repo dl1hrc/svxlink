@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2004  Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2018 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -35,9 +35,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <stdint.h>
 #include <sigc++/sigc++.h>
 
 #include <string>
+#include <vector>
 
 
 /****************************************************************************
@@ -46,6 +48,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <Modulation.h>
 #include <AsyncConfig.h>
 #include <AsyncAudioSink.h>
 
@@ -121,11 +124,22 @@ class Tx : public sigc::trackable, public Async::AudioSink
     {
       TX_OFF, TX_ON, TX_AUTO
     } TxCtrlMode;
+
+    typedef enum
+    {
+      DATA_CMD_SIGLEV, DATA_CMD_DTMF, DATA_CMD_TONE_DETECTED
+    } DataCmd;
+
     
     /**
      * @brief 	Default constuctor
+     * @param   tx_name   The name of the transmitter
      */
-    Tx(void) {}
+    Tx(std::string tx_name)
+      : m_name(tx_name), m_tx_id('\0'), m_verbose(true),
+        m_is_transmitting(false)
+    {
+    }
   
     /**
      * @brief 	Destructor
@@ -137,7 +151,31 @@ class Tx : public sigc::trackable, public Async::AudioSink
      * @return 	Return \em true on success, or \em false on failure
      */
     virtual bool initialize(void) = 0;
-  
+
+    /**
+     * @brief 	Return the name of the transmitter
+     * @return	Return the name of the transmitter
+     */
+    const std::string& name(void) const { return m_name; }
+
+    /**
+     * @brief   Return the ID of the transmitter
+     * @return  The transmitter ID is returned
+     */
+    char id(void) const { return m_tx_id; }
+
+    /*
+     * @brief 	Set the verbosity level of the transmitter
+     * @param	verbose Set to \em false to keep the rx from printing things
+     */
+    virtual void setVerbose(bool verbose) { m_verbose = verbose; }
+
+    /**
+     * @brief   Check if the transmitter is verbose or not
+     * @returns Returns \em true if the transmitter is verbose
+     */
+    virtual bool isVerbose(void) const { return m_verbose; }
+
     /**
      * @brief 	Set the transmit control mode
      * @param 	mode The mode to use to set the transmitter on or off.
@@ -152,7 +190,7 @@ class Tx : public sigc::trackable, public Async::AudioSink
      * @brief 	Check if the transmitter is transmitting
      * @return	Return \em true if transmitting or else \em false
      */
-    virtual bool isTransmitting(void) const = 0;
+    virtual bool isTransmitting(void) const { return m_is_transmitting; }
     
     /**
      * @brief 	Enable/disable CTCSS on TX
@@ -163,12 +201,14 @@ class Tx : public sigc::trackable, public Async::AudioSink
     /**
      * @brief 	Send a string of DTMF digits
      * @param 	digits	The digits to send
+     * @param   duration The tone duration in milliseconds
      */
-    virtual void sendDtmf(const std::string& digits) {}
+    virtual void sendDtmf(const std::string& digits, unsigned duration=0) {}
 
     /**
      * @brief   Set the signal level value that should be transmitted
      * @param   siglev The signal level to transmit
+     * @param   rx_id  The id of the receiver that received the signal
      *
      * This function does not set the output power of the transmitter but
      * instead sets a signal level value that is transmitted with the
@@ -176,8 +216,26 @@ class Tx : public sigc::trackable, public Async::AudioSink
      * on a link transmitter to transport signal level measurements to the
      * link receiver.
      */
-    virtual void setTransmittedSignalStrength(float siglev) {}
+    virtual void setTransmittedSignalStrength(char rx_id, float siglev) {}
+
+    /**
+     * @brief 	Send a data frame
+     * @param 	msg The frame data
+     */
+    virtual void sendData(const std::vector<uint8_t> &msg) {}
     
+    /**
+     * @brief   Set the transmitter frequency
+     * @param   fq The frequency in Hz
+     */
+    virtual void setFq(unsigned fq) {}
+
+    /**
+     * @brief   Set the transmitter modulation mode
+     * @param   mod The modulation to set (@see Modulation::Type)
+     */
+    virtual void setModulation(Modulation::Type mod) {}
+
     /**
      * @brief 	This signal is emitted when the tx timeout timer expires
      *
@@ -194,7 +252,31 @@ class Tx : public sigc::trackable, public Async::AudioSink
      *          is transmitting or else \em false.
      */
     sigc::signal<void, bool> transmitterStateChange;
-    
+
+    /**
+     * @brief	A signal that is emitted to publish a state update event
+     * @param	event_name The name of the event
+     * @param   msg The state update message
+     *
+     * This signal is emitted when a receiver wish to publish a state update
+     * message. A state update message is a free text message that can be used
+     * by subscribers to act on certain state changes within SvxLink. The
+     * event name must be unique within SvxLink. The recommended format is
+     * <context>:<name>, e.g. Tx:tx_state.
+     */
+    sigc::signal<void, const std::string&,
+                 const std::string&> publishStateEvent;
+
+  protected:
+    void setId(char id) { m_tx_id = id; }
+    void setIsTransmitting(bool is_transmitting);
+
+  private:
+    std::string m_name;
+    char        m_tx_id;
+    bool        m_verbose;
+    bool        m_is_transmitting;
+
 };  /* class Tx */
 
 

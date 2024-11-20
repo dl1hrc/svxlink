@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -81,8 +81,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "version/SVXLINK.h"
 #include "MsgHandler.h"
-#include "SimplexLogic.h"
-#include "RepeaterLogic.h"
+#include "Logic.h"
 #include "LinkManager.h"
 
 
@@ -151,16 +150,16 @@ static void logfile_flush(void);
  *
  ****************************************************************************/
 
-static char   	      	*pidfile_name = NULL;
-static char   	      	*logfile_name = NULL;
-static char   	      	*runasuser = NULL;
-static char   	      	*config = NULL;
-static int    	      	daemonize = 0;
-static int    	      	logfd = -1;
-static vector<Logic*>  	logic_vec;
-static FdWatch	      	*stdin_watch = 0;
-static FdWatch	      	*stdout_watch = 0;
-static string         	tstamp_format;
+static char   	      	  *pidfile_name = NULL;
+static char   	      	  *logfile_name = NULL;
+static char   	      	  *runasuser = NULL;
+static char   	      	  *config = NULL;
+static int    	      	  daemonize = 0;
+static int    	      	  logfd = -1;
+static vector<LogicBase*> logic_vec;
+static FdWatch	      	  *stdin_watch = 0;
+static FdWatch	      	  *stdout_watch = 0;
+static string         	  tstamp_format;
 
 
 /****************************************************************************
@@ -229,11 +228,6 @@ int main(int argc, char **argv)
     stdout_watch->activity.connect(sigc::ptr_fun(&stdout_handler));
 
       /* Redirect stdout to the logpipe */
-    if (close(STDOUT_FILENO) == -1)
-    {
-      perror("close(stdout)");
-      exit(1);
-    }
     if (dup2(pipefd[1], STDOUT_FILENO) == -1)
     {
       perror("dup2(stdout)");
@@ -241,19 +235,28 @@ int main(int argc, char **argv)
     }
 
       /* Redirect stderr to the logpipe */
-    if (close(STDERR_FILENO) == -1)
-    {
-      perror("close(stderr)");
-      exit(1);
-    }
     if (dup2(pipefd[1], STDERR_FILENO) == -1)
     {
       perror("dup2(stderr)");
       exit(1);
     }
 
-      /* Close stdin */
-    close(STDIN_FILENO);
+      // We also need to close stdin but that is not a good idea since we need
+      // the stdin filedescriptor to keep being allocated so that it is not
+      // assigned to some other random filedescriptor allocation. That would
+      // be very bad.
+    int devnull = open("/dev/null", O_RDONLY);
+    if (devnull == -1)
+    {
+      perror("open(/dev/null)");
+      exit(1);
+    }
+    if (dup2(devnull, STDIN_FILENO) == -1)
+    {
+      perror("dup2(stdin)");
+      exit(1);
+    }
+    close(devnull);
     
       /* Force stdout to line buffered mode */
     if (setvbuf(stdout, NULL, _IOLBF, 0) != 0)
@@ -429,7 +432,7 @@ int main(int argc, char **argv)
   cfg.getValue("GLOBAL", "TIMESTAMP_FORMAT", tstamp_format);
   
   cout << PROGRAM_NAME " v" SVXLINK_VERSION
-          " Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX\n\n";
+          " Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX\n\n";
   cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
           "This is free software, and you are\n";
   cout << "welcome to redistribute it in accordance with the terms "
@@ -473,7 +476,7 @@ int main(int argc, char **argv)
     cout << "--- Using sample rate " << rate << "Hz\n";
   }
   
-  int card_channels = 2;
+  size_t card_channels = 2;
   cfg.getValue("GLOBAL", "CARD_CHANNELS", card_channels);
   AudioIO::setChannels(card_channels);
 
@@ -524,6 +527,7 @@ int main(int argc, char **argv)
   app.exec();
 
   LinkManager::deleteInstance();
+  LocationInfo::deleteInstance();
 
   logfile_flush();
   
@@ -540,10 +544,10 @@ int main(int argc, char **argv)
     close(pipefd[1]);
   }
 
-  vector<Logic*>::iterator lit;
+  vector<LogicBase*>::iterator lit;
   for (lit=logic_vec.begin(); lit!=logic_vec.end(); lit++)
   {
-    delete *lit;
+    Async::Plugin::unload(*lit);
   }
   logic_vec.clear();
   
@@ -580,6 +584,8 @@ int main(int argc, char **argv)
  */
 static void parse_arguments(int argc, const char **argv)
 {
+  int print_version = 0;
+
   poptContext optCon;
   const struct poptOption optionsTable[] =
   {
@@ -598,6 +604,8 @@ static void parse_arguments(int argc, const char **argv)
     */
     {"daemon", 0, POPT_ARG_NONE, &daemonize, 0,
 	    "Start SvxLink as a daemon", NULL},
+    {"version", 0, POPT_ARG_NONE, &print_version, 0,
+	    "Print the application version string", NULL},
     {NULL, 0, 0, NULL, 0}
   };
   int err;
@@ -634,6 +642,11 @@ static void parse_arguments(int argc, const char **argv)
 
   poptFreeContext(optCon);
 
+  if (print_version)
+  {
+    std::cout << SVXLINK_VERSION << std::endl;
+    exit(0);
+  }
 } /* parse_arguments */
 
 
@@ -670,9 +683,15 @@ static void stdinHandler(FdWatch *w)
     case '8': case '9': case 'A': case 'B':
     case 'C': case 'D': case '*': case '#':
     case 'H':
-      logic_vec[0]->injectDtmfDigit(buf[0], 100);
+    {
+      Logic *logic = dynamic_cast<Logic*>(logic_vec[0]);
+      if (logic != 0)
+      {
+        logic->injectDtmfDigit(buf[0], 100);
+      }
       break;
-    
+    }
+
     default:
       break;
   }
@@ -704,6 +723,9 @@ static void initialize_logics(Config &cfg)
     exit(1);
   }
 
+  std::string logic_core_path(SVX_LOGIC_CORE_INSTALL_DIR);
+  cfg.getValue("GLOBAL", "LOGIC_CORE_PATH", logic_core_path);
+
   string::iterator comma;
   string::iterator begin = logics.begin();
   do
@@ -729,29 +751,29 @@ static void initialize_logics(Config &cfg)
       	   << logic_name << "\". Skipping...\n";
       continue;
     }
-    Logic *logic = 0;
-    if (logic_type == "Simplex")
+    std::string logic_plugin_filename =
+      logic_core_path.empty()
+        ? logic_type + "Logic.so"
+        : logic_core_path + "/" + logic_type + "Logic.so";
+    //std::cout << "### logic_plugin_filename=" << logic_plugin_filename
+    //          << std::endl;
+    LogicBase *logic = Async::Plugin::load<LogicBase>(logic_plugin_filename);
+    if (logic != nullptr)
     {
-      logic = new SimplexLogic(cfg, logic_name);
+      std::cout << "\tFound plugin: " << logic->pluginPath() << std::endl;
+      if (!logic->initialize(cfg, logic_name))
+      {
+        Async::Plugin::unload(logic);
+        logic = nullptr;
+      }
     }
-    else if (logic_type == "Repeater")
+    if (logic == nullptr)
     {
-      logic = new RepeaterLogic(cfg, logic_name);
-    }
-    else
-    {
-      cerr << "*** ERROR: Unknown logic type \"" << logic_type
-      	   << "\"specified for logic " << logic_name << ".\n";
-      continue;
-    }
-    if ((logic == 0) || !logic->initialize())
-    {
-      cerr << "*** ERROR: Could not initialize Logic object \""
+      cerr << "*** ERROR: Could not load or initialize Logic object \""
       	   << logic_name << "\". Skipping...\n";
-      delete logic;
       continue;
     }
-    
+
     logic_vec.push_back(logic);
   } while (comma != logics.end());
   
@@ -862,9 +884,10 @@ static bool logfile_write_timestamp(void)
       ss << setfill('0') << setw(3) << (tv.tv_usec / 1000);
       fmt.replace(pos, frac_code.length(), ss.str());
     }
-    struct tm *tm = localtime(&tv.tv_sec);
+    struct tm tm;
     char tstr[256];
-    size_t tlen = strftime(tstr, sizeof(tstr), fmt.c_str(), tm);
+    size_t tlen = strftime(tstr, sizeof(tstr), fmt.c_str(),
+                           localtime_r(&tv.tv_sec, &tm));
     ssize_t ret = write(logfd, tstr, tlen);
     if (ret != static_cast<ssize_t>(tlen))
     {

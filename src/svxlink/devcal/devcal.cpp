@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2014 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -83,6 +83,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 using namespace std;
+using namespace std::placeholders;
 using namespace Async;
 
 
@@ -124,7 +125,7 @@ class SineGenerator : public Async::AudioSource
       level = level_percent / 100.0;
       if (fqs.size() > 1)
       {
-        level /= powf(10.0f, 3.0f/20.0f) * (fqs.size() - 1);
+        level /= pow(10.0, 3.0/20.0) * (fqs.size() - 1);
       }
     }
 
@@ -313,7 +314,7 @@ class DevPrinter : public AudioSink
     {
       for (int i=0; i<count; ++i)
       {
-        pwr_sum += samples[i] * samples[i];
+        pwr_sum += static_cast<double>(samples[i]) * samples[i];
         amp_sum += samples[i];
 
         float windowed = w[samp_cnt] * samples[i];
@@ -324,13 +325,13 @@ class DevPrinter : public AudioSink
         if (++samp_cnt >= block_size)
         {
           double avg_power = pwr_sum / block_size;
-          float tot_dev = sqrt(avg_power) * sqrt(2);
+          double tot_dev = sqrt(avg_power) * sqrt(2);
           tot_dev *= adj_level;
           tot_dev *= headroom * max_dev;
           tot_dev_est = (1.0-ALPHA) * tot_dev + ALPHA * tot_dev_est;
           pwr_sum = 0.0;
 
-          float dev = 0.0f;
+          double dev = 0.0;
           for (size_t i=0; i<g.size(); ++i)
           {
             dev += g[i].magnitudeSquared();
@@ -384,7 +385,7 @@ class DevPrinter : public AudioSink
     vector<Goertzel> g;
     int           samp_cnt;
     float         max_dev;
-    float         headroom;
+    double        headroom;
     double        adj_level;
     double        dev_est;
     size_t        block_cnt;
@@ -483,15 +484,8 @@ static const unsigned audio_ch = 0;
 
 int main(int argc, const char *argv[])
 {
-  cout << PROGRAM_NAME " v" DEVCAL_VERSION
-          " Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX\n\n";
-  cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
-          "This is free software, and you\n";
-  cout << "are welcome to redistribute it in accordance with the "
-          "terms and conditions in\n";
-  cout << "the GNU GPL (General Public License) version 2 or later.\n\n";
-
   setlocale(LC_ALL, "");
+
   CppApplication app;
   app.catchUnixSignal(SIGINT);
   app.catchUnixSignal(SIGTERM);
@@ -499,9 +493,17 @@ int main(int argc, const char *argv[])
 
   parse_arguments(argc, const_cast<const char **>(argv));
 
+  cout << PROGRAM_NAME " v" DEVCAL_VERSION
+          " Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX\n\n";
+  cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
+          "This is free software, and you\n";
+  cout << "are welcome to redistribute it in accordance with the "
+          "terms and conditions in\n";
+  cout << "the GNU GPL (General Public License) version 2 or later.\n\n";
+
   vector<float> mod_idxs(mod_fqs.size());
   transform(mod_fqs.begin(), mod_fqs.end(), mod_idxs.begin(),
-      bind1st(divides<float>(), caldev));
+      std::bind(divides<float>(), caldev, _1));
   float mod_level = 100.0 * caldev / (maxdev * pow(10.0, headroom_db / 20.0));
   cout << "--- Modulation frequencies [Hz] : ";
   copy(mod_fqs.begin(), mod_fqs.end(), ostream_iterator<float>(cout, " "));
@@ -640,7 +642,7 @@ int main(int argc, const char *argv[])
     }
     if (wb_mode)
     {
-      ddr->setModulation(Ddr::MOD_WBFM);
+      ddr->setModulation(Modulation::MOD_WBFM);
     }
     DevMeasure *dev_measure = new DevMeasure(ddr->preDemodSampleRate(), 
                                              mod_fqs, ddr->nbFq());
@@ -715,6 +717,8 @@ int main(int argc, const char *argv[])
  */
 static void parse_arguments(int argc, const char **argv)
 {
+  int print_version = 0;
+
   poptContext optCon;
   const struct poptOption optionsTable[] =
   {
@@ -744,6 +748,8 @@ static void parse_arguments(int argc, const char **argv)
             &audio_dev, 0,
 	    "The audio device to use for audio output",
             "<type:dev>"},
+    {"version", 0, POPT_ARG_NONE, &print_version, 0,
+	    "Print the application version string", NULL},
     {NULL, 0, 0, NULL, 0}
   };
   int err;
@@ -779,6 +785,12 @@ static void parse_arguments(int argc, const char **argv)
         poptPrintUsage(optCon, stderr, 0);
         exit(1);
     }
+  }
+
+  if (print_version)
+  {
+    std::cout << DEVCAL_VERSION << std::endl;
+    exit(0);
   }
 
   if ((static_cast<int>(cal_rx) + cal_tx + measure) != 1)

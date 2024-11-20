@@ -2,19 +2,17 @@
 #   docker build --pull -t svxlink-fedora-build .
 #
 # Run with:
-#   docker run -it --rm --hostname fedora-build \
-#              --privileged -v /dev/snd:/dev/snd \
-#              svxlink-fedora-build
+#   docker run -it --rm --hostname fedora-build svxlink-fedora-build
 #
 # For using sound inside the docker container add:
-#              --privileged -v /dev/snd:/dev/snd \
-#              -e HOSTAUDIO_GID=$(stat -c "%g" /dev/snd/timer) \
+#              --privileged -v /dev/snd:/dev/snd
+#              -e HOSTAUDIO_GID=$(stat -c "%g" /dev/snd/timer)
 #
 # To import your git config add (mileage may vary):
-#              -v ${HOME}/.gitconfig:/home/svxlink/.gitconfig:ro \
+#              -v ${HOME}/.gitconfig:/home/svxlink/.gitconfig:ro
 #
 # To use a specific git repositoty instead of the default one:
-#              -e GIT_URL=username@your.repo:/path/to/svxlink.git \
+#              -e GIT_URL=username@your.repo:/path/to/svxlink.git
 #
 # To build another branch than master:
 #              -e GIT_BRANCH=the_branch
@@ -29,7 +27,7 @@ MAINTAINER Tobias Blomberg <sm0svx@ssa.se>
 # Install required packages and set up the svxlink user
 RUN dnf -y install git sudo cmake make gcc gcc-c++ libsigc++20-devel \
            alsa-lib-devel speex-devel opus-devel qt-devel rtl-sdr-devel \
-           popt-devel libgcrypt-devel tcl-devel gsm-devel \
+           popt-devel libgcrypt-devel tcl-devel gsm-devel libcurl-devel \
            doxygen alsa-utils wget tar bzip2 \
            vim-enhanced && \
     dnf clean all
@@ -46,9 +44,9 @@ RUN mkdir -p /usr/share/svxlink/sounds && \
 ADD sudoers-svxlink /etc/sudoers.d/svxlink
 RUN chmod 0440 /etc/sudoers.d/svxlink
 
-ENV GIT_URL https://github.com/sm0svx/svxlink.git \
-    GIT_BRANCH master \
-    NUM_CORES 1
+ENV GIT_URL=https://github.com/sm0svx/svxlink.git \
+    GIT_BRANCH=master \
+    NUM_CORES=1
 
 RUN useradd svxlink
 ADD build-svxlink.sh /home/svxlink/

@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -216,7 +216,7 @@ std::string Rx::muteStateToString(MuteState mute_state)
 
 Rx::Rx(Config &cfg, const string& name)
   : m_name(name), m_verbose(true), m_sql_open(false), m_cfg(cfg),
-    m_sql_tmo_timer(0)
+    m_sql_tmo_timer(0), m_mute_state(MUTE_ALL)
 {
 } /* Rx::Rx */
 
@@ -224,6 +224,7 @@ Rx::Rx(Config &cfg, const string& name)
 Rx::~Rx(void)
 {
   delete m_sql_tmo_timer;
+  m_sql_tmo_timer = nullptr;
 } /* Rx::~Rx */
 
 
@@ -242,9 +243,9 @@ bool Rx::initialize(void)
     }
   }
   */
-  
+
   return true;
-  
+
 } /* Rx::initialize */
 
 
@@ -313,27 +314,38 @@ Rx *RxFactory::createNamedRx(Config& cfg, const string& name)
  *
  ****************************************************************************/
 
-void Rx::setSquelchState(bool is_open)
+void Rx::setSquelchState(bool is_open, const std::string& info)
 {
   if (is_open == m_sql_open)
   {
     return;
   }
-  
+
   if (m_verbose)
   {
-    cout << m_name << ": The squelch is " << (is_open ? "OPEN" : "CLOSED")
-         << " (" << signalStrength() << ")" << endl;
+    std::cout << m_name << ": The squelch is "
+              << (is_open ? "OPEN" : "CLOSED");
+    if (!info.empty())
+    {
+      std::cout << " (" << info << ")";
+    }
+    std::cout << std::endl;
   }
   m_sql_open = is_open;
+  m_sql_info = info;
   squelchOpen(is_open);
-  
+
   if (m_sql_tmo_timer != 0)
   {
     m_sql_tmo_timer->setEnable(is_open);
   }
 } /* Rx::setSquelchState */
 
+
+void Rx::setAudioSourceHandler(Async::AudioSource* src)
+{
+  setHandler(src);
+} /* Rx::setAudioSourceHandler */
 
 
 /****************************************************************************
@@ -346,7 +358,7 @@ void Rx::sqlTimeout(Timer *t)
 {
   cerr << "*** WARNING: The squelch was open for too long for receiver "
        << name() << ". Forcing it closed.\n";
-  setSquelchState(false);
+  setSquelchState(false, "TIMEOUT");
 } /* Rx::sqlTimeout */
 
 

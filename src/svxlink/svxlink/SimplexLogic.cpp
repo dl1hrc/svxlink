@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -100,6 +100,16 @@ using namespace Async;
 
 
 
+/****************************************************************************
+ *
+ * Exported Global functions
+ *
+ ****************************************************************************/
+
+extern "C" {
+  LogicBase* construct(void) { return new SimplexLogic; }
+}
+
 
 /****************************************************************************
  *
@@ -116,26 +126,23 @@ using namespace Async;
  ****************************************************************************/
 
 
-SimplexLogic::SimplexLogic(Async::Config& cfg, const string& name)
-  : Logic(cfg, name), mute_rx_on_tx(true), mute_tx_on_rx(true)
+SimplexLogic::SimplexLogic(void)
+  : mute_rx_on_tx(true), mute_tx_on_rx(true),
+    rgr_sound_always(false)
 {
 } /* SimplexLogic::SimplexLogic */
 
 
-SimplexLogic::~SimplexLogic(void)
+bool SimplexLogic::initialize(Async::Config& cfgobj, const string& logic_name)
 {
-} /* SimplexLogic::~SimplexLogic */
-
-
-bool SimplexLogic::initialize(void)
-{
-  if (!Logic::initialize())
+  if (!Logic::initialize(cfgobj, logic_name))
   {
     return false;
   }
   
   cfg().getValue(name(), "MUTE_RX_ON_TX", mute_rx_on_tx);
   cfg().getValue(name(), "MUTE_TX_ON_RX", mute_tx_on_rx);
+  cfg().getValue(name(), "RGR_SOUND_ALWAYS", rgr_sound_always);
   
   rxValveSetOpen(true);
   setTxCtrlMode(Tx::TX_AUTO);
@@ -171,7 +178,7 @@ void SimplexLogic::squelchOpen(bool is_open)
   
   if (!is_open)
   {
-    if (activeModule() != 0)
+    if (rgr_sound_always || (activeModule() != 0))
     {
       enableRgrSoundTimer(true);
     }

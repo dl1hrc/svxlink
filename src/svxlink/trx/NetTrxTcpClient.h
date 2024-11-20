@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -117,7 +117,7 @@ namespace Async
 @author Tobias Blomberg / SM0SVX
 @date   2008-03-15
 */
-class NetTrxTcpClient : public Async::TcpClient
+class NetTrxTcpClient : public Async::TcpClient<>
 {
   public:
     typedef Async::TcpConnection::DisconnectReason DiscReason;
@@ -157,7 +157,17 @@ class NetTrxTcpClient : public Async::TcpClient
      * @brief Get the reason for the last disconnect
      */
     DiscReason disconnectReason(void) const { return disc_reason; }
-    
+
+    /**
+     * @brief 	Connect to the remote host
+     *
+     * This function will initiate a connection to the remote host. The
+     * connection must not be written to before the connected signal
+     * (see @ref TcpClient::connected) has been emitted. If the connection is
+     * already established or pending, nothing will happen.
+     */
+    void connect(void);
+
     /**
      * @brief A signal that is emitted when the connection to the remote side
      *        is ready for operation
@@ -215,6 +225,8 @@ class NetTrxTcpClient : public Async::TcpClient
     DiscReason      disc_reason;
     
     NetTrxTcpClient(const NetTrxTcpClient&);
+    using TcpClientBase::operator=;
+    using TcpConnection::operator=;
     NetTrxTcpClient& operator=(const NetTrxTcpClient&);
     void tcpConnected(void);
     void tcpDisconnected(Async::TcpConnection *con,

@@ -8,7 +8,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2009 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2021 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -75,7 +75,7 @@ namespace Async
 {
   class AudioPassthrough;
 };
-class Logic;
+class LogicBase;
 
 
 /****************************************************************************
@@ -155,7 +155,7 @@ class LinkManager : public sigc::trackable
      * This function will initialize the link manager. It must be called
      * before calling the instace function.
      */
-    static bool initialize(const Async::Config &cfg,
+    static bool initialize(Async::Config &cfg,
                            const std::string &link_names);
 
     /**
@@ -199,13 +199,13 @@ class LinkManager : public sigc::trackable
      *
      * This function should be called by each logic core upon creation.
      */
-    void addLogic(Logic *logic);
+    void addLogic(LogicBase *logic);
 
     /**
      * @brief Delete a logic core from the link manager
      * @param logic The logic to delete
      */
-    void deleteLogic(Logic *logic);
+    void deleteLogic(LogicBase *logic);
 
     /**
      * @brief Should be called after all logics have been initialized
@@ -225,8 +225,61 @@ class LinkManager : public sigc::trackable
      * @param   subcmd The subcommand
      * @return  Returns an event handler command to be executed by the logic
      */
-    std::string cmdReceived(LinkRef link, Logic *logic,
+    std::string cmdReceived(LinkRef link, LogicBase *logic,
                             const std::string &subcmd);
+
+    /**
+     * @brief   Get the current talker for the given logic core
+     * @param   logic_name The name of the sink logic
+     *
+     * Get the pointer to the logic core that is currently producing audio to
+     * the given logic core.
+     */
+    LogicBase *currentTalkerFor(const std::string& logic_name);
+
+    /**
+     * @brief   Set mute state for the given logic core
+     * @param   logic The logic to operate on
+     * @param   mute Set to \em true to mute the given logic core
+     *
+     * Muting a logic core is used to temporarily disconnect it from the
+     * switching matrix. No audio and no events will be passed to/from the
+     * muted logic core.
+     */
+    void setLogicMute(const LogicBase *logic, bool mute);
+
+    /**
+     * @brief   Play the given file
+     * @param   src_logic The initiating logic, which will not play the file
+     * @param   path The full path to the file to play
+     */
+    void playFile(LogicBase *src_logic, const std::string& path);
+
+    /**
+     * @brief   Play the a length of silence
+     * @param   src_logic The initiating logic, which will not play the silence
+     * @param   length The length, in milliseconds, of silence to play
+     */
+    void playSilence(LogicBase *src_logic, int length);
+
+    /**
+     * @brief   Play a tone with the given properties
+     * @param   src_logic The initiating logic, which will not play the tone
+     * @param   fq The tone frequency
+     * @param   amp The tone amplitude in "milliunits", 1000=full strength
+     * @param   len The length of the tone in milliseconds
+     */
+    void playTone(LogicBase *src_logic, int fq, int amp, int len);
+
+    /**
+     * @brief   Play DTMF digits
+     * @param   src_logic The initiating logic, which will not play the digit
+     * @param   digits The DTMF digits to play
+     * @param   amp The amplitude of the individual DTMF tones (0-1000)
+     * @param   len The length in milliseconds of the digit
+     */
+    void playDtmf(LogicBase *src_logic, const std::string& digits, int amp,
+                  int len);
 
   private:
     struct LogicProperties
@@ -239,15 +292,12 @@ class LinkManager : public sigc::trackable
     struct Link
     {
       Link(void)
-        : timeout(0), default_active(false), is_activated(false),
-          timeout_timer(0)
-      {}
+        : default_active(false), is_activated(false), timeout_timer(0) {}
       ~Link(void) { delete timeout_timer; }
 
       std::string  name;
       LogicPropMap logic_props;
       StrSet       auto_activate;
-      unsigned     timeout;
       bool         default_active;
       bool         is_activated;
       Async::Timer *timeout_timer;
@@ -270,8 +320,12 @@ class LinkManager : public sigc::trackable
     typedef std::map<std::string, SinkInfo>   SinkMap;
     struct LogicInfo
     {
-      Logic             *logic;
+      LogicInfo(LogicBase* logic) : logic(logic), is_muted(false) {}
+      LogicBase         *logic;
       sigc::connection  idle_state_changed_con;
+      sigc::connection  received_tg_update_con;
+      sigc::connection  received_publish_state_event_con;
+      bool              is_muted;
     };
     typedef std::map<std::string, LogicInfo> LogicMap;
 
@@ -286,19 +340,25 @@ class LinkManager : public sigc::trackable
 
     LinkManager(void) : all_logics_started(false) {};
     LinkManager(const LinkManager&);
-    ~LinkManager(void) {};
+    ~LinkManager(void);
 
     std::vector<std::string> getLinkNames(const std::string& logicname);
     void wantedConnections(LogicConSet &want);
+    void updateConnections(void);
     void activateLink(Link &link);
     void deactivateLink(Link &link);
+    void sendCmdToLogics(Link &link, LogicBase *src_logic,
+                         const std::string& cmd);
     /*
     bool isConnected(const std::string& source_name,
                      const std::string& sink_name);
     */
     void linkTimeout(Async::Timer *t, Link *link);
-    void logicIdleStateChanged(bool is_idle, const Logic *logic);
+    void logicIdleStateChanged(bool is_idle, const LogicBase *logic);
     void checkTimeoutTimer(Link &link);
+    void onReceivedTgUpdated(LogicBase *src_logic, uint32_t tg);
+    void onPublishStateEvent(LogicBase *src_logic,
+        const std::string& event_name, const std::string& msg);
 
 };  /* class LinkManager */
 

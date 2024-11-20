@@ -1,4 +1,4 @@
-.TH MODULEECHOLINK.CONF 5 "MARS 2013" Linux "File Formats"
+.TH MODULEECHOLINK.CONF 5 "APRIL 2021" Linux "File Formats"
 .
 .SH NAME
 .
@@ -30,6 +30,11 @@ Use this variable very carefully. Connections originating from the given subnet
 will not be checked against the EchoLink directory server. A typical use of this
 is if you want to connect to your own svxlink server and both the server and you
 are behind a IP masquerading firewall. 
+.TP
+.B DROP_ALL_INCOMING
+Silently drop all incoming connections.  No message will be sent to the remote
+station notifying about the drop. The connection will just be ignored and there
+will be no notification in the application log.
 .TP
 .B DROP_INCOMING
 Drop all incoming connections where the remote callsign match this regular
@@ -170,6 +175,20 @@ Set this to the time in seconds that you want in between autoconnect tries.
 A longer description that is sent to remote stations upon connection. This
 description should typically include detailed station information like QTH,
 transceiver frequency/power, antenna, CTCSS tone frequency etc.
+.TP
+.B COMMAND_PTY
+Specify the path to a PTY that can be used to control the EchoLink module from
+the operating system. Commands: "KILL" will disconnect the current talker,
+"DISC callsign" will disconnect the station with the given callsign. Commands
+can be issued using a simple echo command from the shell.
+.TP
+.B LOCAL_RGR_SOUND
+Set this variable to 0 to disable playing a roger sound (beep) locally when the
+remote station stops talking. It's enabled by default.
+.TP
+.B REMOTE_RGR_SOUND
+Set this to 1 to enable sending of a roger sound (beep) to remote Echolink
+stations when the squelch closes on the local node. It's disabled by default.
 .
 .SH REGULAR EXPRESSIONS
 .
@@ -248,7 +267,16 @@ variable setting.
 .
 .SH AUTHOR
 .
-Tobias Blomberg (SM0SVX) <sm0svx at users dot sourceforge dot net>
+Tobias Blomberg (SM0SVX) <sm0svx at svxlink dot org>
+.
+.SH REPORTING BUGS
+.
+Bugs should be reported using the issue tracker at
+https://github.com/sm0svx/svxlink.
+
+Questions about SvxLink should not be asked using the issue tracker. Instead
+use the group set up for this purpose at groups.io:
+https://groups.io/g/svxlink
 .
 .SH "SEE ALSO"
 .

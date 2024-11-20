@@ -71,6 +71,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 using namespace std;
+using namespace std::placeholders;
 
 
 
@@ -176,8 +177,8 @@ WbRxRtlSdr::WbRxRtlSdr(Async::Config &cfg, const string &name)
   rtl->readyStateChanged.connect(
       mem_fun(*this, &WbRxRtlSdr::rtlReadyStateChanged));
 
-  uint32_t fq_corr = 0;
-  if (cfg.getValue(name, "FQ_CORR", fq_corr))
+  int fq_corr = 0;
+  if (cfg.getValue(name, "FQ_CORR", fq_corr) && (fq_corr != 0))
   {
     //cout << "###   FQ_CORR     = " << (int32_t)fq_corr << "ppm\n";
     rtl->setFqCorr(fq_corr);
@@ -264,9 +265,19 @@ void WbRxRtlSdr::unregisterDdr(Ddr *ddr)
     // Delete myself if this was the last DDR
   if (ddrs.empty())
   {
+    instances.erase(m_name);
     delete this;
   }
 } /* WbRxRtlSdr::unregisterDdr */
+
+
+void WbRxRtlSdr::updateDdrFq(Ddr *ddr)
+{
+  if (auto_tune_enabled)
+  {
+    findBestCenterFq();
+  }
+} /* WbRxRtlSdr::updateDdrFq */
 
 
 bool WbRxRtlSdr::isReady(void) const
@@ -377,7 +388,7 @@ void WbRxRtlSdr::rtlReadyStateChanged(void)
     vector<float> tuner_gains;
     tuner_gains.assign(int_tuner_gains.begin(), int_tuner_gains.end());
     transform(tuner_gains.begin(), tuner_gains.end(),
-        tuner_gains.begin(), bind2nd(divides<float>(),10.0));
+        tuner_gains.begin(), std::bind(divides<float>(), _1, 10.0));
     cout << "\tValid tuner gains : ";
     copy(tuner_gains.begin(), tuner_gains.end(),
         ostream_iterator<float>(cout, " "));

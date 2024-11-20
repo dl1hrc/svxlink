@@ -143,7 +143,7 @@ class RtlSdr : public sigc::trackable
     virtual ~RtlSdr(void);
   
     /**
-     * @brief 	Enable printing of distorsion warnings
+     * @brief 	Enable printing of distortion warnings
      * @param 	enable Set to \em true to enable printing
      */
     void enableDistPrint(bool enable);
@@ -354,7 +354,7 @@ class RtlSdr : public sigc::trackable
      * The correction factor is given in parts per million (PPM). That is,
      * how many Hz per MHz the tuner is off.
      */
-    virtual void handleSetFqCorr(uint32_t corr) = 0;
+    virtual void handleSetFqCorr(int corr) = 0;
 
     /**
      * @brief   Enable or disable test mode

@@ -1,4 +1,4 @@
-.TH DEVCAL 1 "NOVEMBER 2015" Linux "User Manuals"
+.TH DEVCAL 1 "AUGUST 2021" Linux "User Manuals"
 .
 .SH NAME
 .
@@ -54,10 +54,10 @@ neighbouring channels. The default value is 5000Hz.
 .BI "-H|--headroom=" "headroom in dB"
 The headroom is the margin to add above the maximum deviation level. Adding a
 headroom will allow SvxLink to handle levels above the maximum deviation level
-without causing immediate distorsion. The default is 6dB which mean that
+without causing immediate distortion. The default is 6dB which mean that
 SvxLink can handle twice the specified maximum deviation. If both maxdev and
 headroom are left at their default this will mean that SvxLink can handle 10kHz
-deviation without distorsion.
+deviation without distortion.
 
 Changing the headroom cause a lot of different effects so don't do that unless
 you are prepared to deal with the problems. For example, increasing the
@@ -75,7 +75,7 @@ Specify this command line option to perform transmitter calibration.
 .B -F|--flat
 Perform calibration on a transmitter or receiver that has a flat frequency
 response (no pre- or de-emphasis). If the transceiver has flat frequency
-responce but you have enabled pre-/de-emphasis in SvxLink, this option should
+response but you have enabled pre-/de-emphasis in SvxLink, this option should
 NOT be specified.
 .TP
 .B -M|--measure
@@ -189,7 +189,7 @@ value into the configuration file in the receiver section.
 .SH EXAMPLE: CALIBRATING USING A DVB-T USB DONGLE
 .
 This is an example of how the calibration procedure may be performed using a
-DVB-T USB dongle and an arbitrary transmitter, like a handie tranceiver.
+DVB-T USB dongle and an arbitrary transmitter, like a handie transceiver.
 
 The calibration transmitter, a handie transmitter for example, must be able to
 send some form of modulated tone for this procedure to work. The 1750Hz tone
@@ -218,7 +218,7 @@ Make sure that devcal is started in measurement mode like when the deviation on
 the calibration transmitter was measured above. Then, on the system being
 calibrated, start the transmitter calibration.
 
-  devcal -t -f1750 -d3200 /path/to/svxlink.conf RxRtl
+  devcal -t -f1750 -d3200 /path/to/svxlink.conf Tx1
 
 The value of 3200 was the one we measured in the first step. Adjust it to match
 your own measurements. Adjust the output level using alsamixer and MASTER_GAIN
@@ -240,15 +240,27 @@ transceivers. This is an issue that remains to find the cause of.
 ASYNC_AUDIO_NOTRIGGER
 Set this environment variable to 1 if you get an error about
 .B ioctl: Broken pipe
-during remotetrx server startup when using OSS audio.
+during devcal startup when using OSS audio.
+.TP
+ASYNC_AUDIO_ALSA_ZEROFILL
+Set this environment variable to 0 to stop the Alsa audio code from writing
+zeros to the audio device when there is no audio to write available.
+ASYNC_AUDIO_UDP_ZEROFILL
+Set this environment variable to 1 to enable the UDP audio code to write zeros
+to the UDP connection when there is no audio to write available.
 .
 .SH AUTHOR
 .
-Tobias Blomberg (SM0SVX) <sm0svx at users dot sourceforge dot net>
+Tobias Blomberg (SM0SVX) <sm0svx at svxlink dot org>
 .
 .SH REPORTING BUGS
 .
-SvxLink Devel <svxlink-devel at lists dot sourceforge dot net>
+Bugs should be reported using the issue tracker at
+https://github.com/sm0svx/svxlink.
+
+Questions about SvxLink should not be asked using the issue tracker. Instead
+use the group set up for this purpose at groups.io:
+https://groups.io/g/svxlink
 .
 .SH "SEE ALSO"
 .

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Sox options for raw sample format
 SOX_RAW_SAMP_FMT="-traw -e signed-integer -b 16"
@@ -49,9 +49,9 @@ process()
         silence 1 0:0:0.01 $silence_front_level reverse \
 	silence 1 0:0:0.01 $silence_back_level reverse \
 	$effect \
-	norm -3
+	norm -6
   else
-    sox $format $1 $format - $effect norm -3
+    sox $format $1 $format - $effect norm -6
   fi
 }
 

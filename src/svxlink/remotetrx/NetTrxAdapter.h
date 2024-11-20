@@ -166,15 +166,16 @@ class NetTrxAdapter
   private:
     static std::map<std::string, NetTrxAdapter*> net_trx_adapters;
     
-    Uplink    	  *ul;
-    Async::Config cfg;
-    TxAdapter 	  *txa1;
-    TxAdapter 	  *txa2;
-    RxAdapter 	  *rxa1;
-    std::string   net_uplink_name;
+    Uplink*         ul;
+    Async::Config&  cfg;
+    TxAdapter*      txa1;
+    TxAdapter*      txa2;
+    RxAdapter*      rxa1;
+    std::string     net_uplink_name;
     
     NetTrxAdapter(const NetTrxAdapter&);
     NetTrxAdapter& operator=(const NetTrxAdapter&);
+    void onTransmittedSignalStrength(RxAdapter *rx, char rx_id, float siglev);
     
 };  /* class NetTrxAdapter */
 

@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2018 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <AsyncAudioSplitter.h>
+#include <json/json.h>
 
 
 
@@ -115,9 +116,11 @@ using namespace Async;
  ****************************************************************************/
 
 MultiTx::MultiTx(Config& cfg, const string& name)
-  : cfg(cfg), m_name(name), splitter(0)
+  : Tx(name), cfg(cfg), splitter(0),
+    m_tx_state_delay_timer(100, Async::Timer::TYPE_ONESHOT, false)
 {
-  
+  m_tx_state_delay_timer.expired.connect(
+      sigc::hide(sigc::mem_fun(*this, &MultiTx::txStateDelayExpired)));
 } /* MultiTx::MultiTx */
 
 
@@ -139,10 +142,16 @@ MultiTx::~MultiTx(void)
 
 bool MultiTx::initialize(void)
 {
-  string transmitters;
-  if (!cfg.getValue(m_name, "TRANSMITTERS", transmitters))
+  char tx_id = '\0';
+  if (cfg.getValue(name(), "TX_ID", tx_id))
   {
-    cerr << "*** ERROR: Config variable " << m_name
+    setId(tx_id);
+  }
+
+  string transmitters;
+  if (!cfg.getValue(name(), "TRANSMITTERS", transmitters))
+  {
+    cerr << "*** ERROR: Config variable " << name()
       	 << "/TRANSMITTERS not set\n";
     return false;
   }
@@ -163,9 +172,10 @@ bool MultiTx::initialize(void)
       	// FIXME: Cleanup
       	return false;
       }
+      tx->setVerbose(false);
       tx->txTimeout.connect(txTimeout.make_slot());
       tx->transmitterStateChange.connect(
-      	      mem_fun(*this, &MultiTx::onTransmitterStateChange));
+      	      hide(mem_fun(*this, &MultiTx::onTransmitterStateChange)));
       
       splitter->addSink(tx);
       
@@ -196,6 +206,7 @@ void MultiTx::setTxCtrlMode(TxCtrlMode mode)
 } /* MultiTx::setTxCtrlMode */
 
 
+#if 0
 bool MultiTx::isTransmitting(void) const
 {
   bool is_transmitting = false;
@@ -208,6 +219,7 @@ bool MultiTx::isTransmitting(void) const
   return is_transmitting;
   
 } /* MultiTx::isTransmitting */
+#endif
 
 
 void MultiTx::enableCtcss(bool enable)
@@ -220,24 +232,34 @@ void MultiTx::enableCtcss(bool enable)
 } /* MultiTx::enableCtcss */
 
 
-void MultiTx::sendDtmf(const std::string& digits)
+void MultiTx::sendDtmf(const std::string& digits, unsigned duration)
 {
   list<Tx *>::iterator it;
   for (it=txs.begin(); it!=txs.end(); ++it)
   {
-    (*it)->sendDtmf(digits);
+    (*it)->sendDtmf(digits, duration);
   }
 } /* MultiTx::sendDtmf */
 
 
-void MultiTx::setTransmittedSignalStrength(float siglev)
+void MultiTx::setTransmittedSignalStrength(char rx_id, float siglev)
 {
   list<Tx *>::iterator it;
   for (it=txs.begin(); it!=txs.end(); ++it)
   {
-    (*it)->setTransmittedSignalStrength(siglev);
+    (*it)->setTransmittedSignalStrength(rx_id, siglev);
   }
 } /* MultiTx::setTransmittedSignalStrength */
+
+
+void MultiTx::sendData(const std::vector<uint8_t> &msg)
+{
+  list<Tx *>::iterator it;
+  for (it=txs.begin(); it!=txs.end(); ++it)
+  {
+    (*it)->sendData(msg);
+  }
+} /* MultiTx::sendData */
 
 
 
@@ -255,17 +277,53 @@ void MultiTx::setTransmittedSignalStrength(float siglev)
  *
  ****************************************************************************/
 
-void MultiTx::onTransmitterStateChange(bool is_transmitting)
+void MultiTx::onTransmitterStateChange(void)
 {
-  if (is_transmitting == isTransmitting())
+  bool is_transmitting = false;
+  list<Tx *>::const_iterator it;
+  for (it=txs.begin(); it!=txs.end(); ++it)
   {
-    transmitterStateChange(is_transmitting);
+    if ((*it)->isTransmitting())
+    {
+      is_transmitting = true;
+      break;
+    }
   }
+  setIsTransmitting(is_transmitting);
+  m_tx_state_delay_timer.setEnable(true);
+  m_tx_state_delay_timer.reset();
 } /* MultiTx::onTransmitterStateChange */
 
+
+void MultiTx::txStateDelayExpired(void)
+{
+  Json::Value event(Json::arrayValue);
+  list<Tx *>::const_iterator it;
+  for (it=txs.begin(); it!=txs.end(); ++it)
+  {
+    Tx *tx = *it;
+    char tx_id = tx->id();
+    if (tx_id != '\0')
+    {
+      Json::Value tx_state(Json::objectValue);
+      tx_state["name"] = tx->name();
+      tx_state["id"] = std::string(&tx_id, &tx_id+1);
+      tx_state["transmit"] = tx->isTransmitting();
+      event.append(tx_state);
+    }
+  }
+  Json::StreamWriterBuilder builder;
+  builder["commentStyle"] = "None";
+  builder["indentation"] = ""; //The JSON document is written on a single line
+  Json::StreamWriter* writer = builder.newStreamWriter();
+  std::stringstream os;
+  writer->write(event, &os);
+  delete writer;
+  //std::cout << "### " << os.str() << std::endl;
+  publishStateEvent("MultiTx:state", os.str());
+} /* MultiTx::txStateDelayExpired */
 
 
 /*
  * This file has not been truncated
  */
-

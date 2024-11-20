@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -34,11 +34,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <stdint.h>
 #include <sigc++/sigc++.h>
 
 #include <string>
 #include <map>
 #include <cassert>
+#include <vector>
 
 
 /****************************************************************************
@@ -47,6 +49,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <Modulation.h>
 #include <AsyncConfig.h>
 #include <AsyncAudioSource.h>
 
@@ -132,6 +135,12 @@ class Rx : public sigc::trackable, public Async::AudioSource
       MUTE_ALL      //! Mute everything. Also close the audio device.
     } MuteState;
 
+    static const char ID_UNKNOWN = '?';   //! Unknown RX id
+
+    /**
+     * @brief   Translate a mute state to a printable sting
+     * @returns Return a printable version of the given mute state
+     */
     static std::string muteStateToString(MuteState mute_state);
 
     /**
@@ -143,7 +152,13 @@ class Rx : public sigc::trackable, public Async::AudioSource
      * @brief 	Destructor
      */
     virtual ~Rx(void);
-  
+
+    /**
+     * @brief   The config object
+     * @returns Returns a reference to the configuration object
+     */
+    Async::Config& cfg(void) { return m_cfg; }
+
     /**
      * @brief 	Initialize the receiver object
      * @return 	Return \em true on success, or \em false on failure
@@ -164,16 +179,27 @@ class Rx : public sigc::trackable, public Async::AudioSource
 
     /**
      * @brief 	Set the mute state for this receiver
-     * @param 	mute_state The mute state to set for this receiver
+     * @param 	new_mute_state The mute state to set for this receiver
      */
-    virtual void setMuteState(MuteState new_mute_state) = 0;
-    
+    virtual void setMuteState(MuteState new_mute_state)
+    {
+      m_mute_state = new_mute_state;
+    }
+
+    /**
+     * @brief   Get the mute state for this receiver
+     * @return  Returns the current mute state for this receiver
+     */
+    virtual MuteState muteState(void) const { return m_mute_state; }
+
     /**
      * @brief 	Check the squelch status
      * @return	Return \em true if the squelch is open or else \em false
      */
     bool squelchIsOpen(void) const { return m_sql_open; }
-    
+
+    const std::string& squelchActivityInfo(void) const { return m_sql_info; }
+
     /**
      * @brief 	Call this function to add a tone detector to the RX
      * @param 	fq The tone frequency to detect
@@ -200,7 +226,7 @@ class Rx : public sigc::trackable, public Async::AudioSource
      * @brief 	Find out RX ID of last receiver with squelch activity
      * @returns Returns the RX ID
      */
-    virtual int sqlRxId(void) const { return 0; }
+    virtual char sqlRxId(void) const { return ID_UNKNOWN; }
     
     /**
      * @brief 	Reset the receiver object to its default settings
@@ -212,6 +238,18 @@ class Rx : public sigc::trackable, public Async::AudioSource
      * @returns Returns \em true if the receiver is ready for operation
      */
     virtual bool isReady(void) const { return true; }
+
+    /**
+     * @brief   Set the receiver frequency
+     * @param   fq The frequency in Hz
+     */
+    virtual void setFq(unsigned fq) {}
+
+    /**
+     * @brief   Set the receiver modulation mode
+     * @param   mod The modulation to set (@see Modulation::Type)
+     */
+    virtual void setModulation(Modulation::Type mod) {}
 
     /**
      * @brief 	A signal that indicates if the squelch is open or not
@@ -245,6 +283,12 @@ class Rx : public sigc::trackable, public Async::AudioSource
      * @param	siglev The new signal level
      */
     sigc::signal<void, float> signalLevelUpdated;
+
+    /**
+     * @brief   A signal that is emitted when digital data have been received
+     * @param   frame The data frame that was received
+     */
+    sigc::signal<void, std::vector<uint8_t>&> dataReceived;
     
     /**
      * @brief	A signal that is emitted to publish a state update event
@@ -265,23 +309,31 @@ class Rx : public sigc::trackable, public Async::AudioSource
      */
     sigc::signal<void> readyStateChanged;
 
-    
   protected:
     /**
-     * @brief 	Set the state of the squelch
-     * @param	is_open Set to \em true if the squelch is open and to
-     *	      	      	\em false if it is closed.
+     * @brief   Set the state of the squelch
+     * @param   is_open Set to \em true if the squelch is open and to
+     *                  \em false if it is closed.
+     * @param   info Information about the squelch event
+     *
+     * This function is used by a receiver implementation to set the state of
+     * the squelch, if it's opened or closed. The info argument is used to
+     * supply a short text string containing information about why the squelch
+     * opened or closed. It may be a signal level or a CTCSS frequency.
      */
-    void setSquelchState(bool is_open);
-    
-    
+    void setSquelchState(bool is_open, const std::string& info="");
+
+    void setAudioSourceHandler(Async::AudioSource* src);
+
   private:
-    std::string   m_name;
-    bool          m_verbose;
-    bool      	  m_sql_open;
-    Async::Config m_cfg;
-    Async::Timer  *m_sql_tmo_timer;
-    
+    std::string         m_name;
+    bool                m_verbose;
+    bool                m_sql_open;
+    Async::Config&      m_cfg;
+    Async::Timer*       m_sql_tmo_timer;
+    std::string         m_sql_info;
+    MuteState           m_mute_state;
+
     void sqlTimeout(Async::Timer *t);
     
 };  /* class Rx */

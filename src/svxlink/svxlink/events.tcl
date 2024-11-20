@@ -18,17 +18,43 @@
 # EchoLink, Help, Parrot etc. If a sound is not found in the specified context,
 # a search in the "Default" context is done.
 #
-proc playMsg {context msg} {
+# It's also possible to have local overrides by putting files under a "local"
+# directory either directly under the "sounds" directory or under the language
+# pack directory. For example if context is "Core" and the language is set to
+# "en_US" the following paths will be searched:
+#
+#   .../sounds/en_US/local/Core/
+#   .../sounds/local/Core/
+#   .../sounds/en_US/Core/
+#   .../sounds/en_US/local/Default/
+#   .../sounds/local/Default/
+#   .../sounds/en_US/Default/
+#
+#   context   - The context to look for the sound files in (e.g Default,
+#               Parrot etc).
+#   msg       - The basename of the file to play
+#   warn      - Set to 0 to not print a warning if no sound clip was found
+#
+proc playMsg {context msg {warn 1}} {
   global basedir
   global langdir
 
-  set candidates [glob -nocomplain "$langdir/$context/$msg.{wav,raw,gsm}" \
-                                   "$langdir/Default/$msg.{wav,raw,gsm}"];
-  if { [llength $candidates] > 0 } {
+  set candidates [glob -nocomplain \
+      "$langdir/local/$context/$msg.{wav,raw,gsm}" \
+      "$basedir/sounds/local/$context/$msg.{wav,raw,gsm}" \
+      "$langdir/$context/$msg.{wav,raw,gsm}" \
+      "$langdir/local/Default/$msg.{wav,raw,gsm}" \
+      "$basedir/sounds/local/Default/$msg.{wav,raw,gsm}" \
+      "$langdir/Default/$msg.{wav,raw,gsm}"];
+  if {[llength $candidates] > 0} {
     playFile [lindex $candidates 0];
   } else {
-    puts "*** WARNING: Could not find audio clip \"$msg\" in context \"$context\"";
+    if {$warn} {
+      puts "*** WARNING: Could not find audio clip \"$msg\" in context \"$context\"";
+    }
+    return 0
   }
+  return 1
 }
 
 
@@ -83,6 +109,34 @@ proc processEvent {module ev} {
 }
 
 
+#
+# Read and execute (source) a TCL file
+# Check if the given TCL file is readable before trying to source it. Print
+# a warning if the file is not readable.
+#
+#   filename - The file to read
+#
+proc sourceTcl {filename} {
+  if [file readable $filename] {
+    source $filename
+  } else {
+    puts "*** WARNING: Could not load TCL event file: $filename"
+  }
+}
+
+
+#
+# Get a variable and if it does not exist return the default value
+#
+#   varname - The name of the variable to get
+#   default - The default value to set if the variable is undefined
+#
+proc getVar {varname default} {
+  upvar $varname var
+  expr {[info exists var] ? $var : $default}
+}
+
+
 ###############################################################################
 #
 # Main program
@@ -101,31 +155,31 @@ set langdir "$basedir/sounds/$lang"
 # Source all tcl files in the events.d directory.
 # This directory contains the main event handlers.
 foreach {file} [glob -directory $basedir/events.d *.tcl] {
-  source $file;
+  sourceTcl $file
 }
 
 # Source all files in the events.d/local directory.
 # This directory contains local modifications to the main event handlers.
 foreach {file} [glob -nocomplain -directory $basedir/events.d/local *.tcl] {
-  source $file;
+  sourceTcl $file;
 }
 
 # Source all tcl files in the language specific events.d directory.
 # This directory contains the main event handlers.
 foreach {file} [glob -nocomplain -directory $langdir/events.d *.tcl] {
-  source $file;
+  sourceTcl $file;
 }
 
 # Source all files in the language specific events.d/local directory.
 # This directory contains local modifications to the main event handlers.
 foreach {file} [glob -nocomplain -directory $langdir/events.d/local *.tcl] {
-  source $file;
+  sourceTcl $file;
 }
 
 # Source all files in the modules.d directory.
 # This directory contains modules written in TCL.
 foreach {file} [glob -directory $basedir/modules.d *.tcl] {
-  source $file;
+  sourceTcl $file;
 }
 
 if [info exists is_core_event_handler] {

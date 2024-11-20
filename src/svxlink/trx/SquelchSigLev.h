@@ -37,6 +37,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <cmath>
 
 
 /****************************************************************************
@@ -118,11 +120,14 @@ level squelch.
 class SquelchSigLev : public Squelch
 {
   public:
+      /// The name of this class when used by the object factory
+    static constexpr const char* OBJNAME = "SIGLEV";
+
     /**
      * @brief 	Default constuctor
      */
-    SquelchSigLev(SigLevDet *det)
-      : sig_lev_det(det), open_thresh(0), close_thresh(0) {}
+    SquelchSigLev(void)
+      : sig_lev_det(0), open_thresh(0), close_thresh(0) {}
 
     /**
      * @brief 	Destructor
@@ -132,34 +137,51 @@ class SquelchSigLev : public Squelch
     /**
      * @brief 	Initialize the squelch detector
      * @param 	cfg A previsously initialized config object
-     * @param 	rx_name The name of the RX (config section name)
+     * @param 	name The name of the config section
      * @return	Returns \em true on success or else \em false
      */
-    bool initialize(Async::Config& cfg, const std::string& rx_name)
+    bool initialize(Async::Config& cfg, const std::string& name)
     {
-      if (!Squelch::initialize(cfg, rx_name))
+      if (!Squelch::initialize(cfg, name))
       {
       	return false;
       }
 
-      std::string value;
-      if (!cfg.getValue(rx_name, "SIGLEV_OPEN_THRESH", value))
+      if (cfg.getValue(name, "SIGLEV_OPEN_THRESH", open_thresh))
       {
-	std::cerr << "*** ERROR: Config variable " << rx_name
-	      	  << "/SIGLEV_OPEN_THRESH not set\n";
-	return false;
+        std::cerr << "*** WARNING: Config variable SIGLEV_OPEN_THRESH has "
+                     "been renamed to SQL_SIGLEV_OPEN_THRESH." << std::endl;
       }
-      open_thresh = atoi(value.c_str());
-
-      if (!cfg.getValue(rx_name, "SIGLEV_CLOSE_THRESH", value))
+      else if (!cfg.getValue(name, "SQL_SIGLEV_OPEN_THRESH", open_thresh))
       {
-	std::cerr << "*** ERROR: Config variable " << rx_name
+        std::cerr << "*** ERROR: Config variable " << name
+                  << "/SQL_SIGLEV_OPEN_THRESH not set\n";
+        return false;
+      }
+
+      if (cfg.getValue(name, "SIGLEV_CLOSE_THRESH", close_thresh))
+      {
+        std::cerr << "*** WARNING: Config variable SIGLEV_CLOSE_THRESH has "
+                     "been renamed to SQL_SIGLEV_CLOSE_THRESH." << std::endl;
+      }
+      else if (!cfg.getValue(name, "SQL_SIGLEV_CLOSE_THRESH", close_thresh))
+      {
+	std::cerr << "*** ERROR: Config variable " << name
 	      	  << "/SIGLEV_CLOSE_THRESH not set\n";
 	return false;
       }
-      close_thresh = atoi(value.c_str());
 
-      return true;
+      std::string rx_name(name);
+      if (cfg.getValue(name, "SIGLEV_RX_NAME", rx_name))
+      {
+        std::cerr << "*** WARNING: Config variable SIGLEV_RX_NAME has "
+                     "been renamed to SQL_SIGLEV_RX_NAME." << std::endl;
+      }
+      cfg.getValue(name, "SQL_SIGLEV_RX_NAME", rx_name);
+
+      sig_lev_det = createSigLevDet(cfg, rx_name);
+
+      return (sig_lev_det != 0);
     }
 
   protected:
@@ -171,15 +193,15 @@ class SquelchSigLev : public Squelch
      */
     int processSamples(const float *samples, int count)
     {
-      if (signalDetected())
+      float siglev = sig_lev_det->lastSiglev();
+      bool opened = !signalDetected() && (siglev >= open_thresh);
+      bool closed = signalDetected() && (siglev < close_thresh);
+      if (opened || closed)
       {
-      	setSignalDetected(sig_lev_det->lastSiglev() >= close_thresh);
+        std::ostringstream ss;
+        ss << static_cast<int>(std::roundf(siglev));
+        setSignalDetected(opened, ss.str());
       }
-      else
-      {
-      	setSignalDetected(sig_lev_det->lastSiglev() >= open_thresh);
-      }
-
       return count;
     }
 

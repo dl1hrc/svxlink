@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2018 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -145,10 +145,10 @@ class NetRx : public Rx
     
     /**
      * @brief 	Set the mute state for this receiver
-     * @param 	mute_state The mute state to set for this receiver
+     * @param 	new_mute_state The mute state to set for this receiver
      */
-    void setMuteState(MuteState new_mute_state);
-    
+    void setMuteState(MuteState new_mute_state) override;
+
     /**
      * @brief 	Call this function to add a tone detector to the RX
      * @param 	fq The tone frequency to detect
@@ -171,13 +171,25 @@ class NetRx : public Rx
      * @brief 	Find out RX ID of last receiver with squelch activity
      * @returns Returns the RX ID
      */
-    int sqlRxId(void) const { return last_sql_rx_id; }
+    char sqlRxId(void) const { return last_sql_rx_id; }
         
     /**
      * @brief 	Reset the receiver object to its default settings
      */
     void reset(void);
     
+    /**
+     * @brief   Set the receiver frequency
+     * @param   fq The frequency in Hz
+     */
+    virtual void setFq(unsigned fq);
+
+    /**
+     * @brief   Set the receiver modulation mode
+     * @param   mod The modulation to set (@see Modulation::Type)
+     */
+    virtual void setModulation(Modulation::Type mod);
+
     /**
      * @brief Resume audio output to the sink
      *
@@ -186,28 +198,29 @@ class NetRx : public Rx
      * This function is normally only called from a connected sink object.
      */
     //virtual void resumeOutput(void) {}
-    
 
   protected:
-    
 
   private:
     Async::Config     	&cfg;
-    Rx::MuteState       mute_state;
     NetTrxTcpClient  	*tcp_con;
     bool                log_disconnects_once;
     bool                log_disconnect;
     float     	      	last_signal_strength;
-    int       	      	last_sql_rx_id;
+    char       	      	last_sql_rx_id;
     std::list<ToneDet*> tone_detectors;
     bool      	      	unflushed_samples;
     bool      	      	sql_is_open;
     Async::AudioDecoder *audio_dec;
-    
+    unsigned            fq;
+    Modulation::Type    modulation;
+    std::string         last_sql_activity_info;
+
     void connectionReady(bool is_ready);
     void handleMsg(NetTrxMsg::Msg *msg);
     void sendMsg(NetTrxMsg::Msg *msg);
     void allEncodedSamplesFlushed(void);
+    void publishSquelchState(void);
 
 };  /* class NetRx */
 

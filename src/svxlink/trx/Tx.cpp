@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2013 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2018 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -33,6 +33,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <iostream>
+#include <sstream>
+#include <json/json.h>
 
 
 
@@ -55,7 +57,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "NetTx.h"
 #include "MultiTx.h"
 #include "DummyRxTx.h"
-
 
 
 /****************************************************************************
@@ -129,7 +130,7 @@ class DummyTxFactory : public TxFactory
   protected:
     Tx *createTx(Config &cfg, const string& name)
     {
-      return new DummyTx;
+      return new DummyTx(name);
     }
 }; /* class MultiTxFactory */
 
@@ -230,6 +231,38 @@ Tx *TxFactory::createNamedTx(Config& cfg, const string& name)
  * Protected member functions
  *
  ****************************************************************************/
+
+void Tx::setIsTransmitting(bool is_transmitting)
+{
+  if (is_transmitting != m_is_transmitting)
+  {
+    if (isVerbose())
+    {
+      cout << m_name << ": Turning the transmitter "
+           << (is_transmitting ? "ON" : "OFF") << endl;
+    }
+    m_is_transmitting = is_transmitting;
+    transmitterStateChange(is_transmitting);
+
+    char tx_id = id();
+    if (tx_id != '\0')
+    {
+      Json::Value tx(Json::objectValue);
+      tx["name"] = name();
+      tx["id"] = std::string(&tx_id, &tx_id+1);
+      tx["transmit"] = is_transmitting;
+      Json::StreamWriterBuilder builder;
+      builder["commentStyle"] = "None";
+      builder["indentation"] = ""; //The JSON document is written on a single line
+      Json::StreamWriter* writer = builder.newStreamWriter();
+      std::stringstream os;
+      writer->write(tx, &os);
+      delete writer;
+      publishStateEvent("Tx:state", os.str());
+    }
+  }
+} /* Tx::setIsTransmitting */
+
 
 
 

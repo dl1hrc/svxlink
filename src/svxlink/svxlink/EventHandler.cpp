@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -55,7 +55,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include "EventHandler.h"
-#include "Logic.h"
 #include "Module.h"
 
 
@@ -119,20 +118,20 @@ using namespace Async;
  ****************************************************************************/
 
 
-EventHandler::EventHandler(const string& event_script, Logic *logic)
-  : event_script(event_script), logic(logic), interp(0)
+EventHandler::EventHandler(const string& event_script, const string& logic_name)
+  : event_script(event_script), logic_name(logic_name), interp(0)
 {
   interp = Tcl_CreateInterp();
   if (interp == 0)
   {
     cerr << "*** ERROR: Could not create TCL interpreter for logic "
-         << logic->name() << "\n";
+         << logic_name << "\n";
     return;
   }
   
   if (Tcl_Init(interp) != TCL_OK)
   {
-    cerr << event_script << " in logic " << logic->name() << ": "
+    cerr << event_script << " in logic " << logic_name << ": "
          << Tcl_GetStringResult(interp) << endl;
     Tcl_DeleteInterp(interp);
     interp = 0;
@@ -147,6 +146,10 @@ EventHandler::EventHandler(const string& event_script, Logic *logic)
   Tcl_CreateCommand(interp, "deactivateModule", deactivateModuleHandler,
                     this, NULL);
   Tcl_CreateCommand(interp, "publishStateEvent", publishStateEventHandler,
+                    this, NULL);
+  Tcl_CreateCommand(interp, "playDtmf", playDtmfHandler, this, NULL);
+  Tcl_CreateCommand(interp, "injectDtmf", injectDtmfHandler, this, NULL);
+  Tcl_CreateCommand(interp, "setConfigValue", setConfigValueHandler,
                     this, NULL);
 
   setVariable("script_path", event_script);
@@ -177,7 +180,7 @@ bool EventHandler::initialize(void)
   
   if (Tcl_EvalFile(interp, event_script.c_str()) != TCL_OK)
   {
-    cerr << event_script << " in logic " << logic->name() << ": "
+    cerr << event_script << " in logic " << logic_name << ": "
          << Tcl_GetStringResult(interp) << endl;
     return false;
   }
@@ -185,6 +188,16 @@ bool EventHandler::initialize(void)
   return true;
   
 } /* EventHandler::initialize */
+
+
+void EventHandler::addCommand(const std::string& name, CommandHandler f)
+{
+  Tcl_CreateCommand(interp, name.c_str(), genericCommandHandler,
+      new CommandHandler(f),
+      [](ClientData cdata) {
+        delete static_cast<CommandHandler*>(cdata);
+      });
+} /* EventHandler::addCommand */
 
 
 void EventHandler::setVariable(const string& name, const string& value)
@@ -198,7 +211,7 @@ void EventHandler::setVariable(const string& name, const string& value)
   if (Tcl_SetVar(interp, name.c_str(), value.c_str(), TCL_LEAVE_ERR_MSG)
   	== NULL)
   {
-    cerr << event_script << " in logic " << logic->name() << ": "
+    cerr << event_script << " in logic " << logic_name << ": "
          << Tcl_GetStringResult(interp) << endl;
   }
   Tcl_Release(interp);
@@ -217,7 +230,7 @@ bool EventHandler::processEvent(const string& event)
   if (Tcl_Eval(interp, (event + ";").c_str()) != TCL_OK)
   {
     cerr << "*** ERROR: Unable to handle event: " << event
-      	 << " in logic " << logic->name() << " ("
+         << " in logic " << logic_name << " ("
          << Tcl_GetStringResult(interp) << ")" << endl;
     success = false;
   }
@@ -271,26 +284,12 @@ const string EventHandler::eventResult(void) const
  *
  ****************************************************************************/
 
-
-/*
- *----------------------------------------------------------------------------
- * Method:    
- * Purpose:   
- * Input:     
- * Output:    
- * Author:    
- * Created:   
- * Remarks:   
- * Bugs:      
- *----------------------------------------------------------------------------
- */
-
 int EventHandler::playFileHandler(ClientData cdata, Tcl_Interp *irp, int argc,
       	      	      	   const char *argv[])
 {
   if(argc != 2)
   {
-    char msg[] = "Usage: playFile: <filename>";
+    static char msg[] = "Usage: playFile: <filename>";
     Tcl_SetResult(irp, msg, TCL_STATIC);
     return TCL_ERROR;
   }
@@ -309,7 +308,7 @@ int EventHandler::playSilenceHandler(ClientData cdata, Tcl_Interp *irp,
 {
   if(argc != 2)
   {
-    char msg[] = "Usage: playSilence <milliseconds>";
+    static char msg[] = "Usage: playSilence <milliseconds>";
     Tcl_SetResult(irp, msg, TCL_STATIC);
     return TCL_ERROR;
   }
@@ -327,7 +326,7 @@ int EventHandler::playToneHandler(ClientData cdata, Tcl_Interp *irp,
 {
   if(argc != 4)
   {
-    char msg[] = "Usage: playTone <fq> <amp> <milliseconds>";
+    static char msg[] = "Usage: playTone <fq> <amp> <milliseconds>";
     Tcl_SetResult(irp, msg, TCL_STATIC);
     return TCL_ERROR;
   }
@@ -348,7 +347,7 @@ int EventHandler::recordHandler(ClientData cdata, Tcl_Interp *irp,
   {
     if((argc < 2) || (argc > 3))
     {
-      char msg[] = "Usage: recordStart <filename> [max_time]";
+      static char msg[] = "Usage: recordStart <filename> [max_time]";
       Tcl_SetResult(irp, msg, TCL_STATIC);
       return TCL_ERROR;
     }
@@ -365,7 +364,7 @@ int EventHandler::recordHandler(ClientData cdata, Tcl_Interp *irp,
   {
     if(argc != 1)
     {
-      char msg[] = "Usage: recordStop";
+      static char msg[] = "Usage: recordStop";
       Tcl_SetResult(irp, msg, TCL_STATIC);
       return TCL_ERROR;
     }
@@ -384,7 +383,7 @@ int EventHandler::deactivateModuleHandler(ClientData cdata, Tcl_Interp *irp,
 {
   if(argc != 1)
   {
-    char msg[] = "Usage: deactivateModule";
+    static char msg[] = "Usage: deactivateModule";
     Tcl_SetResult(irp, msg, TCL_STATIC);
     return TCL_ERROR;
   }
@@ -401,7 +400,7 @@ int EventHandler::publishStateEventHandler(ClientData cdata, Tcl_Interp *irp,
 {
   if (argc != 3)
   {
-    char msg[] = "Usage: publishStateEvent <event name> <event msg>";
+    static char msg[] = "Usage: publishStateEvent <event name> <event msg>";
     Tcl_SetResult(irp, msg, TCL_STATIC);
     return TCL_ERROR;
   }
@@ -412,6 +411,84 @@ int EventHandler::publishStateEventHandler(ClientData cdata, Tcl_Interp *irp,
   return TCL_OK;
 }
 
+
+int EventHandler::playDtmfHandler(ClientData cdata, Tcl_Interp *irp,
+                                  int argc, const char *argv[])
+{
+  if(argc != 4)
+  {
+    static char msg[] = "Usage: playDtmf <digits> <amp> <milliseconds>";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+  //cout << "EventHandler::playDtmf: " << argv[1] << ", "
+  //    << argv[2] << ", " << argv[3]<< endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->playDtmf(argv[1], atoi(argv[2]), atoi(argv[3]));
+
+  return TCL_OK;
+} /* EventHandler::playDtmfHandler */
+
+
+int EventHandler::injectDtmfHandler(ClientData cdata, Tcl_Interp *irp,
+                                    int argc, const char *argv[])
+{
+  if((argc < 2) or (argc > 3))
+  {
+    static char msg[] = "Usage: injectDtmf <digits> [milliseconds]";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+  string digits(argv[1]);
+  int duration = 100;
+  if (argc == 3)
+  {
+    duration = atoi(argv[2]);
+  }
+  //cout << "EventHandler::injectDtmf: " << digits << ", " << duration << endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->injectDtmf(digits, duration);
+
+  return TCL_OK;
+} /* EventHandler::injectDtmfHandler */
+
+
+int EventHandler::setConfigValueHandler(ClientData cdata, Tcl_Interp *irp,
+                                        int argc, const char *argv[])
+{
+  if(argc != 4)
+  {
+    static char msg[] = "Usage: setConfigValue <section> <tag> <value>";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+  string section(argv[1]);
+  string tag(argv[2]);
+  string value(argv[3]);
+  //std::cout << "### EventHandler::setConfigValueHandler: " << section << "/"
+  //          << tag << "=" << value << std::endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->setConfigValue(section, tag, value);
+
+  return TCL_OK;
+} /* EventHandler::setConfigValueHandler */
+
+
+int EventHandler::genericCommandHandler(ClientData cdata, Tcl_Interp *irp,
+                                        int argc, const char *argv[])
+{
+  const auto& func = *static_cast<CommandHandler*>(cdata);
+  std::string msg = func(argc, argv);
+  if (!msg.empty())
+  {
+    auto msg_alloc_len = msg.size()+1;
+    char* msg_copy = Tcl_Alloc(msg_alloc_len);
+    memcpy(msg_copy, msg.c_str(), msg_alloc_len);
+    Tcl_SetResult(irp, msg_copy, TCL_DYNAMIC);
+    return TCL_ERROR;
+  }
+  return TCL_OK;
+} /* EventHandler::genericCommandHandler */
 
 
 /*

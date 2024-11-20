@@ -9,7 +9,7 @@ to a remote host. See usage instructions in the class definition.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003  Tobias Blomberg
+Copyright (C) 2003-2022 Tobias Blomberg
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -27,8 +27,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 \endverbatim
 */
 
-
-
 #ifndef ASYNC_TCP_CONNECTION_INCLUDED
 #define ASYNC_TCP_CONNECTION_INCLUDED
 
@@ -41,8 +39,16 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <sigc++/sigc++.h>
 #include <stdint.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
 
 #include <string>
+#include <cassert>
+#include <cstring>
+#include <vector>
+#include <map>
 
 
 /****************************************************************************
@@ -52,6 +58,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <AsyncIpAddress.h>
+#include <AsyncFdWatch.h>
+#include <AsyncSslContext.h>
+#include <AsyncSslX509.h>
 
 
 /****************************************************************************
@@ -85,7 +94,6 @@ namespace Async
  *
  ****************************************************************************/
 
-class FdWatch;
 class IpAddress;
 
 
@@ -119,8 +127,15 @@ class IpAddress;
 This class is used to handle an existing TCP connection. It is not meant to
 be used directly but could be. It it mainly created to handle connections
 for Async::TcpClient and Async::TcpServer.
+
+It can also handle SSL/TLS connections. A raw TCP connection can be switched to
+be encrypted using the setSslContext() and enableSsl() functions.
+
+The reception buffer size given at construction time or using the
+setRecvBufLen() function is an initial value. If during the connection a larger
+buffer is needed the size will be automatically increased.
 */
-class TcpConnection : public sigc::trackable
+class TcpConnection : virtual public sigc::trackable
 {
   public:
     /**
@@ -131,12 +146,35 @@ class TcpConnection : public sigc::trackable
       DR_HOST_NOT_FOUND,       ///< The specified host was not found in the DNS
       DR_REMOTE_DISCONNECTED,  ///< The remote host disconnected
       DR_SYSTEM_ERROR,	       ///< A system error occured (check errno)
-      DR_RECV_BUFFER_OVERFLOW, ///< Receiver buffer overflow
-      DR_ORDERED_DISCONNECT    ///< Disconnect ordered locally
+      DR_ORDERED_DISCONNECT,   ///< Disconnect ordered locally
+      DR_PROTOCOL_ERROR,       ///< Protocol error
+      DR_SWITCH_PEER,          ///< A better peer was found so reconnecting
+      DR_BAD_STATE             ///< The connection ended up in a bad state
     } DisconnectReason;
-    
+
     /**
-     * @brief The default length of the reception buffer
+     * @brief   A sigc return value accumulator for signals returning bool
+     *
+     * This sigc accumulator will return \em true if all connected slots return
+     * \em true.
+     */
+    struct if_all_true_acc
+    {
+      typedef bool result_type;
+      template <class I>
+      bool operator()(I first, I last)
+      {
+        bool success = true;
+        for (; first != last; first ++)
+        {
+          success &= *first;
+        }
+        return success;
+      }
+    };
+
+    /**
+     * @brief The default size of the reception buffer
      */
     static const int DEFAULT_RECV_BUF_LEN = 1024;
     
@@ -147,7 +185,7 @@ class TcpConnection : public sigc::trackable
     
     /**
      * @brief 	Constructor
-     * @param 	recv_buf_len  The length of the receiver buffer to use
+     * @param 	recv_buf_len  The initial size of the receive buffer
      */
     explicit TcpConnection(size_t recv_buf_len = DEFAULT_RECV_BUF_LEN);
     
@@ -156,7 +194,7 @@ class TcpConnection : public sigc::trackable
      * @param 	sock  	      The socket for the connection to handle
      * @param 	remote_addr   The remote IP-address of the connection
      * @param 	remote_port   The remote TCP-port of the connection
-     * @param 	recv_buf_len  The length of the receiver buffer to use
+     * @param 	recv_buf_len  The initial size of the receive buffer
      */
     TcpConnection(int sock, const IpAddress& remote_addr,
       	      	  uint16_t remote_port,
@@ -166,17 +204,30 @@ class TcpConnection : public sigc::trackable
      * @brief 	Destructor
      */
     virtual ~TcpConnection(void);
-    
+
+    /**
+     * @brief   Move assignmnt operator
+     * @param   other The object to move from
+     * @return  Returns this object
+     *
+     * The move operator move the state of a specified TcpConnection object
+     * into this object. After the move, the state of the other object will be
+     * the same as if it had just been default constructed.
+     */
+    virtual TcpConnection& operator=(TcpConnection&& other);
+
     /**
      * @brief   Set a new receive buffer size
      * @param   recv_buf_len The new receive buffer size in bytes
      *
      * This function will resize the receive buffer to the specified size.
      * If the buffer size is reduced and there are more bytes in the current
-     * buffer than can be fitted into the new buffer, an overflow disconnection
-     * will be issued on the next reception.
+     * buffer than can be fitted into the new buffer, the buffer resize
+     * request vill be silently ignored.
      */
     void setRecvBufLen(size_t recv_buf_len);
+
+    size_t recvBufLen(void) const { return m_recv_buf.capacity(); }
 
     /**
      * @brief 	Disconnect from the remote host
@@ -185,7 +236,7 @@ class TcpConnection : public sigc::trackable
      * disconnected, nothing will be done. The disconnected signal is not
      * emitted when this function is called
      */
-    void disconnect(void);
+    virtual void disconnect(void) { closeConnection(); }
     
     /**
      * @brief 	Write data to the TCP connection
@@ -193,8 +244,20 @@ class TcpConnection : public sigc::trackable
      * @param 	count The number of bytes to send from the buffer
      * @return	Returns the number of bytes written or -1 on failure
      */
-    int write(const void *buf, int count);
-    
+    virtual int write(const void *buf, int count);
+
+    /**
+     * @brief   Get the local IP address associated with this connection
+     * @return  Returns an IP address
+     */
+    IpAddress localHost(void) const;
+
+    /**
+     * @brief   Get the local TCP port associated with this connection
+     * @return  Returns a port number
+     */
+    uint16_t localPort(void) const;
+
     /**
      * @brief 	Return the IP-address of the remote host
      * @return	Returns the IP-address of the remote host
@@ -221,10 +284,56 @@ class TcpConnection : public sigc::trackable
      * @return  Returns \em true if the connection is idle
      *
      * A connection being idle means that it is not connected
-     * NOTE: This function is overridden in Async::TcpClient.
      */
     bool isIdle(void) const { return sock == -1; }
-    
+
+    /**
+     * @brief   Enable or disable TLS for this connection
+     * @param   enable Set to \em true to enable
+     */
+    void enableSsl(bool enable);
+
+    /**
+     * @brief   Get the peer certificate associated with this connection
+     * @return  Returns the X509 certificate associated with the peer
+     *
+     * This function is used to retrieve the peer certificate that the peer has
+     * sent to us during the setup phase. If no certificate was sent this
+     * function will return a null object so checking for that condition can be
+     * done by comparing the returned object with nullptr.
+     */
+    SslX509 sslPeerCertificate(void);
+
+    /**
+     */
+    Async::SslX509 sslCertificate(void) const;
+
+    /**
+     * @brief   Get the result of the certificate verification process
+     * @return  Returns the verification result (e.g. X509_V_OK for ok)
+     */
+    long sslVerifyResult(void) const;
+
+    /**
+     * @brief   Set the OpenSSL context to use when setting up the connection
+     * @param   ctx The context object to use
+     * @param   is_server Set to \em true if this is a server side connection
+     *
+     * This function should be called prior to calling enableSsl in order to
+     * set up a TLS context to use when setting up the connection.
+     */
+    void setSslContext(SslContext& ctx, bool is_server);
+
+    SslContext* sslContext(void) { return m_ssl_ctx; }
+
+    bool isServer(void) const { return m_ssl_is_server; }
+
+    /**
+     * @brief   Get common name for the SSL connection
+     * @return  Returns the common name for the associated X509 certificate
+     */
+    //std::string sslCommonName(void) const;
+
     /**
      * @brief 	A signal that is emitted when a connection has been terminated
      * @param 	con   	The connection object
@@ -247,15 +356,32 @@ class TcpConnection : public sigc::trackable
      * will be appended to the old data.
      */
     sigc::signal<int, TcpConnection *, void *, int> dataReceived;
-    
-    /**
-     * @brief 	A signal that is emitted when the send buffer status changes
-     * @param 	is_full Set to \em true if the buffer is full or \em false
-     *	      	      	if a buffer full condition has been cleared
-     */
-    sigc::signal<void, bool> sendBufferFull;
 
-        
+    /**
+     * @brief   A signal that is emitted on SSL/TLS certificate verification
+     * @param   con The connection object
+     * @param   preverify_ok Is \em true if the OpenSSL verification is ok
+     * @param   x509_store_ctx The X509 store context
+     *
+     * Connect to this signal to be able to tap in to the certificate
+     * verification process. All slots that connect to this signal must return
+     * true for the verification process to succeed.
+     *
+     * For more information on the function arguments have a look at the manual
+     * page for the OpenSSL function SSL_set_verify().
+     */
+    sigc::signal<bool, TcpConnection*, bool,
+                 X509_STORE_CTX*>::accumulated<if_all_true_acc> verifyPeer;
+
+    /**
+     * @brief   A signal that is emitted when the SSL connection is ready
+     * @param   con The connection object
+     *
+     * This signal is emitted when the SSL initialization and handshake has
+     * finished after the application has called the enableSsl() function.
+     */
+    sigc::signal<void, TcpConnection*> sslConnectionReady;
+
   protected:
     /**
      * @brief 	Setup information about the connection
@@ -289,20 +415,125 @@ class TcpConnection : public sigc::trackable
      * in use. If it is -1 it has not been set.
      */
     int socket(void) const { return sock; }
-    
-    
+
+    /**
+     * @brief   Disconnect from the remote peer
+     *
+     * This function is used internally to close the connection to the remote
+     * peer.
+     */
+    virtual void closeConnection(void);
+
+    /**
+     * @brief 	Called when a connection has been terminated
+     * @param 	reason  The reason for the disconnect
+     *
+     * This function will be called when the connection has been terminated.
+     * The default action for this function is to emit the disconnected signal.
+     */
+    virtual void onDisconnected(DisconnectReason reason)
+    {
+      emitDisconnected(reason);
+    }
+
+    /**
+     * @brief 	Called when data has been received on the connection
+     * @param 	buf   A buffer containg the read data
+     * @param 	count The number of bytes in the buffer
+     * @return	Return the number of processed bytes
+     *
+     * This function is called when data has been received on this connection.
+     * The buffer will contain the bytes read from the operating system.
+     * The function will return the number of bytes that has been processed. The
+     * bytes not processed will be stored in the receive buffer for this class
+     * and presented again to the slot when more data arrives. The new data
+     * will be appended to the old data.
+     * The default action for this function is to emit the dataReceived signal.
+     */
+    virtual int onDataReceived(void *buf, int count)
+    {
+      return dataReceived(this, buf, count);
+    }
+
+    /**
+     * @brief   Emit the disconnected signal
+     * @param   reason The reason for the disconnection
+     */
+    virtual void emitDisconnected(DisconnectReason reason)
+    {
+      disconnected(this, reason);
+    }
+
+    /**
+     * @brief   Emit the verifyPeer signal
+     * @param   preverify_ok  The basic certificate verifications passed
+     * @param   x509_store_ctx  The OpenSSL X509 store context
+     * @return  Returns 1 on success or 0 if verification fail
+     */
+    virtual int emitVerifyPeer(int preverify_ok,
+                               X509_STORE_CTX* x509_store_ctx)
+    {
+      if (verifyPeer.empty())
+      {
+        return preverify_ok;
+      }
+      return verifyPeer(this, preverify_ok == 1, x509_store_ctx) ? 1 : 0;
+    }
+
   private:
-    IpAddress remote_addr;
-    uint16_t  remote_port;
-    size_t    recv_buf_len;
-    int       sock;
-    FdWatch * rd_watch;
-    FdWatch * wr_watch;
-    char *    recv_buf;
-    size_t    recv_buf_cnt;
-    
+    friend class TcpClientBase;
+
+    enum SslStatus { SSLSTATUS_OK, SSLSTATUS_WANT_IO, SSLSTATUS_FAIL };
+    struct Char
+    {
+      char value;
+      Char(void) noexcept
+      {
+        // Do nothing to suppress automatic initialization on container resize
+        // for m_recv_buf.
+        static_assert(sizeof *this == sizeof value, "invalid size");
+        static_assert(__alignof *this == __alignof value, "invalid alignment");
+      }
+    };
+
+    static constexpr const size_t DEFAULT_BUF_SIZE = 1024;
+
+    static std::map<SSL*, TcpConnection*> ssl_con_map;
+
+    IpAddress         remote_addr;
+    uint16_t          remote_port         = 0;
+    int               sock                = -1;
+    FdWatch           rd_watch;
+    std::vector<Char> m_recv_buf;
+    Async::FdWatch    m_wr_watch;
+    std::vector<char> m_write_buf;
+
+    SslContext*       m_ssl_ctx           = nullptr;
+    bool              m_ssl_is_server     = false;
+    SSL*              m_ssl               = nullptr;
+    BIO*              m_ssl_rd_bio        = nullptr; // SSL reads, we write
+    BIO*              m_ssl_wr_bio        = nullptr; // SSL writes, we read
+    std::vector<char> m_ssl_encrypt_buf;
+
+    static TcpConnection* lookupConnection(SSL* ssl)
+    {
+      auto it = ssl_con_map.find(ssl);
+      return (it != ssl_con_map.end()) ? it->second : nullptr;
+    }
+    static int sslVerifyCallback(int preverify_ok,
+                                 X509_STORE_CTX* x509_store_ctx);
+
     void recvHandler(FdWatch *watch);
-    void writeHandler(FdWatch *watch);
+    void addToWriteBuf(const char *buf, size_t len);
+    void onWriteSpaceAvailable(Async::FdWatch* w);
+    int rawWrite(const void* buf, int count);
+
+    void sslPrintErrors(const char* fname);
+    SslStatus sslGetStatus(int n);
+    int sslRecvHandler(char* src, int count);
+    SslStatus sslDoHandshake(void);
+    int sslEncrypt(void);
+    int sslWrite(const void* buf, int count);
 
 };  /* class TcpConnection */
 

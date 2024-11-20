@@ -131,10 +131,16 @@ class AudioDeviceOSS : public Async::AudioDevice
     ~AudioDeviceOSS(void);
   
     /**
-     * @brief 	Find out what the blocksize is set to
+     * @brief 	Find out what the read (recording) blocksize is set to
      * @return	Returns the currently set blocksize in samples per channel
      */
-    virtual int blocksize(void);
+    virtual size_t readBlocksize(void);
+
+    /**
+     * @brief 	Find out what the write (playback) blocksize is set to
+     * @return	Returns the currently set blocksize in samples per channel
+     */
+    virtual size_t writeBlocksize(void);
 
     /**
      * @brief 	Check if the audio device has full duplex capability
@@ -189,7 +195,7 @@ class AudioDeviceOSS : public Async::AudioDevice
     FdWatch	      	*write_watch;
     int       	      	device_caps;
     bool      	      	use_trigger;
-    int			frag_size;
+    size_t              frag_size;
     
     void audioReadHandler(FdWatch *watch);
     void writeSpaceAvailable(FdWatch *watch);

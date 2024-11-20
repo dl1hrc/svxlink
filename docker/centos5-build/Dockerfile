@@ -25,6 +25,9 @@
 FROM centos:5
 MAINTAINER Tobias Blomberg <sm0svx@ssa.se>
 
+# Install static Yum config since CentOS 5 is EOL
+ADD *.repo /etc/yum.repos.d/
+
 # Install required packages and set up the svxlink user
 RUN yum -y install epel-release && \
     yum -y install git sudo cmake28 make gcc gcc-c++ libsigc++20-devel \
@@ -50,9 +53,9 @@ RUN mkdir -p /usr/share/svxlink/sounds && \
 ADD sudoers /etc/
 RUN chmod 0440 /etc/sudoers
 
-ENV GIT_URL https://github.com/sm0svx/svxlink.git \
-    GIT_BRANCH master \
-    NUM_CORES 1
+ENV GIT_URL=https://github.com/sm0svx/svxlink.git \
+    GIT_BRANCH=master \
+    NUM_CORES=1
 
 RUN useradd svxlink
 ADD build-svxlink.sh /home/svxlink/
