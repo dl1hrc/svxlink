@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -432,7 +432,7 @@ int main(int argc, char **argv)
   cfg.getValue("GLOBAL", "TIMESTAMP_FORMAT", tstamp_format);
 
   cout << PROGRAM_NAME " v" SVXLINK_VERSION
-          " Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX\n\n";
+          " Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX\n\n";
   cout << PROGRAM_NAME " comes with ABSOLUTELY NO WARRANTY. "
           "This is free software, and you are\n";
   cout << "welcome to redistribute it in accordance with the terms "
@@ -584,6 +584,8 @@ int main(int argc, char **argv)
  */
 static void parse_arguments(int argc, const char **argv)
 {
+  int print_version = 0;
+
   poptContext optCon;
   const struct poptOption optionsTable[] =
   {
@@ -602,6 +604,8 @@ static void parse_arguments(int argc, const char **argv)
     */
     {"daemon", 0, POPT_ARG_NONE, &daemonize, 0,
 	    "Start SvxLink as a daemon", NULL},
+    {"version", 0, POPT_ARG_NONE, &print_version, 0,
+	    "Print the application version string", NULL},
     {NULL, 0, 0, NULL, 0}
   };
   int err;
@@ -638,6 +642,11 @@ static void parse_arguments(int argc, const char **argv)
 
   poptFreeContext(optCon);
 
+  if (print_version)
+  {
+    std::cout << SVXLINK_VERSION << std::endl;
+    exit(0);
+  }
 } /* parse_arguments */
 
 

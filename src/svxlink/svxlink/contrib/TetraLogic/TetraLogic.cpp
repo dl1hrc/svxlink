@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "11022024"
+#define TETRA_LOGIC_VERSION "19112024"
 
 /****************************************************************************
  *
@@ -212,7 +212,8 @@ TetraLogic::TetraLogic(void)
   cmgs_received(true), share_userinfo(true), current_cci(0), dmnc(0),
   dmcc(0), dissi(0), infosds(""), is_tx(false), last_sdsid(0), pei_pty_path(""),
   pei_pty(0), ai(-1), check_qos(0), qos_sds_to("0815"), qos_limit(-90),
-  qosTimer(300000, Timer::TYPE_ONESHOT, false), min_rssi(100), max_rssi(100),
+  qosTimer(300000, Timer::TYPE_ONESHOT, false),
+  userRegTimer(120000, Timer::TYPE_ONESHOT, false), min_rssi(100), max_rssi(100),
   reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model(""), inactive_time(3600)
 {
   peiComTimer.expired.connect(mem_fun(*this, &TetraLogic::onComTimeout));
@@ -718,6 +719,10 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     qosTimer.setEnable(true);
     log(LOGDEBUG, "QOS enabled");
   }
+
+  // start the user registration timer, after expiration
+  // it checks the registration state of the registered users
+  userRegTimer.setEnable(true);
 
   // hadle the Pei serial port
   pei = new Serial(port);

@@ -117,12 +117,16 @@ Example:
 TIME_BETWEEN_SDS=360
 .TP
 .B INIT_PEI
+This parameter will be removed in further versions. Please do not use
+it anymore. It has been replaced by the pei-init.json file.
 If PEI_INIT_FILE is defined INIT_PEI will be ignored!
 The initialization commands that are send to the Tetra radio to enable a
 bi-directional communication while SvxLink is starting. Example:
 INIT_PEI=AT+CTOM=1;AT+CTSP=1,3,131;AT+CTSP=1,3,130;AT+CTSP=1,2,20
 .TP
 .B TETRA_USERS
+This parameter will be removed in further versions. Please do not use
+it anymore. It has been replaced by the tetra_users.json file.
 The section name that contain list of user information. Example:
 TETRA_USERS=Tetra_Users
 The format is:
