@@ -737,6 +737,25 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
     }
     sendMsg(msg);
   }
+  else if (event_name == "QsoInfo:state")
+  {
+    std::istringstream is(data);
+    Json::Value user_info;
+    is >> user_info;
+    user_info["TG"] = m_selected_tg;
+    string ud = jsonToString(user_info);
+
+    MsgStateEvent msg(logic->name(), event_name, ud);
+    sendMsg(msg);
+  }
+  else if (event_name == "Sds:info" || event_name == "DvUsers:info" ||
+           event_name == "Rssi:info" || event_name == "System:info" ||
+           event_name == "Qso:info" || event_name == "Register:info" ||
+           event_name == "ForwardSds:info")
+  {
+    MsgStateEvent msg(logic->name(), event_name, data);
+    sendMsg(msg);
+  }
 } /* ReflectorLogic::remoteReceivedPublishStateEvent */
 
 
@@ -1865,6 +1884,14 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
   LinkManager::instance()->playDtmf(this, digit, amp, duration);
 } /* ReflectorLogic::handlePlayDtmf */
 
+
+string ReflectorLogic::jsonToString(Json::Value eventmessage)
+{
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  std::string message = Json::writeString(builder, eventmessage);
+  return message;
+} /* ReflectorLogic::jsonToString */
 
 /*
  * This file has not been truncated
