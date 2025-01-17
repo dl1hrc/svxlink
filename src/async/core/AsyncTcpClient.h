@@ -9,7 +9,7 @@ to a remote host. See usage instructions in the class definition.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003-2022 Tobias Blomberg
+Copyright (C) 2003-2024 Tobias Blomberg
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -203,6 +203,11 @@ class TcpClient : public ConT, public TcpClientBase
       return TcpClientBase::isIdle() && ConT::isIdle();
     }
 
+    void setSslContext(SslContext& ctx)
+    {
+      ConT::setSslContext(ctx, false);
+    }
+
   protected:
     /**
      * @brief   Disconnect from the remote peer
@@ -215,6 +220,9 @@ class TcpClient : public ConT, public TcpClientBase
       ConT::closeConnection();
       TcpClientBase::closeConnection();
     }
+
+    using ConT::operator=;
+    using TcpClientBase::operator=;
 
   private:
 

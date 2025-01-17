@@ -7,9 +7,15 @@ set(CPPPROGS AsyncAudioIO_demo AsyncDnsLookup_demo AsyncFdWatch_demo
              AsyncAudioFsf_demo AsyncHttpServer_demo AsyncFactory_demo
              AsyncAudioContainer_demo AsyncTcpPrioClient_demo
              AsyncStateMachine_demo AsyncPlugin_demo
+             AsyncSslTcpServer_demo AsyncSslTcpClient_demo
+             AsyncSslX509_demo AsyncDigest_demo
              )
 
 set(QTPROGS AsyncQtApplication_demo)
+
+if(LADSPA_FOUND)
+  set(CPPPROGS ${CPPPROGS} AsyncAudioLADSPAPlugin_demo)
+endif(LADSPA_FOUND)
 
 
 # Build all demo applications

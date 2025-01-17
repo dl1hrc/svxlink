@@ -96,7 +96,21 @@ HOSTS=reflector-primary.example.org,reflector-secondary.example.org:5301
 #HOST_PRIO_INC=1
 #HOST_WEIGHT=10
 CALLSIGN="MYCALL"
-AUTH_KEY="Change this key now!"
+#CERT_PKI_DIR="@SVX_LOCAL_STATE_DIR@/pki"
+#CERT_KEYFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.key
+#CERT_CSRFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.csr
+#CERT_CRTFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.crt
+#CERT_CAFILE=@SVX_LOCAL_STATE_DIR@/pki/ca-bundle.pem
+#CERT_DOWNLOAD_CA_BUNDLE=1
+#CERT_SUBJ_givenName=John
+#CERT_SUBJ_surname=Doe
+#CERT_SUBJ_organizationalUnitName=SvxLink
+#CERT_SUBJ_organizationName=SSA
+#CERT_SUBJ_localityName=Stockholm
+#CERT_SUBJ_stateOrProvinceName=Södermanland
+#CERT_SUBJ_countryName=SE
+#CERT_EMAIL=mycall@example.com
+#AUTH_KEY="Change this key now!"
 #JITTER_BUFFER_DELAY=0
 #DEFAULT_TG=999
 #MONITOR_TGS=99901,99902,99903
@@ -258,6 +272,15 @@ DTMF_SERIAL=/dev/ttyS0
 #OB_AFSK_ENABLE=0
 #OB_AFSK_VOICE_GAIN=6
 #IB_AFSK_ENABLE=0
+#LADSPA_PLUGINS=hpf:1000,@Rx1_Compressor
+
+#[Rx1_Compressor]
+#LABEL=tap_dynamics_m
+#Attack=4
+#Release=500
+#Offset Gain=15
+#Makeup Gain=15
+#Function=13
 
 [WbRx1]
 #TYPE=RtlUsb
@@ -303,6 +326,15 @@ DTMF_DIGIT_PWR=-15
 #IB_AFSK_ENABLE=0
 #IB_AFSK_LEVEL=-6
 #IB_AFSK_TX_DELAY=100
+#LADSPA_PLUGINS=hpf:1000,@Tx1_Compressor
+
+#[Tx1_Compressor]
+#LABEL=tap_dynamics_m
+#Attack=4
+#Release=500
+#Offset Gain=15
+#Makeup Gain=15
+#Function=13
 
 [LocationInfo]
 APRS_SERVER_LIST=euro.aprs2.net:14580

@@ -41,6 +41,14 @@ been activated.
 .B DEBUG
 Gives out some debug information.
 .TP
+.B EXTENSION
+String to be appended to the ICAO-code in the https request, e.g. ".TXT". The
+request is then
+data/observations/metar/stations/ICAO.TXT instead of
+data/observations/metar/stations/ICAO
+Example:
+EXTENSION=.TXT
+.TP
 .B TYPE
 The format type of getting weather information. Valid values are XML and TXT
 .TP

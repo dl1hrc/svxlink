@@ -9,7 +9,7 @@ A module (plugin) to request the latest METAR (weather) information from
 predefined airports.
 Look at http://en.wikipedia.org/wiki/METAR for further information
 
-Copyright (C) 2004-2009  Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2024  Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -127,7 +127,7 @@ class ModuleMetarInfo : public Module
   public:
     ModuleMetarInfo(void *dl_handle, Logic *logic, const std::string& cfg_name);
     virtual ~ModuleMetarInfo(void);
-    const char *compiledForVersion(void) const { return SVXLINK_VERSION; }
+    const char *compiledForVersion(void) const { return SVXLINK_APP_VERSION; }
 
   protected:
     virtual void resumeOutput(void);
@@ -159,6 +159,7 @@ class ModuleMetarInfo : public Module
     std::string server;
     std::string link;
     Http* http;
+    std::string extension;
 
     bool initialize(void);
     void activateInit(void);

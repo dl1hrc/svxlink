@@ -10,7 +10,7 @@ the SvxLink core is running. It can also be a DDR (Digital Drop Receiver).
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -84,6 +84,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "HdlcDeframer.h"
 #include "Tx.h"
 #include "Emphasis.h"
+#include "LADSPAPluginLoader.h"
 
 
 /****************************************************************************
@@ -266,7 +267,8 @@ bool LocalRxBase::initialize(void)
   
   int delay_line_len = 0;
   bool  mute_1750 = false;
-  if (cfg().getValue(name(), "1750_MUTING", mute_1750))
+  cfg().getValue(name(), "1750_MUTING", mute_1750);
+  if (mute_1750)
   {
     delay_line_len = max(delay_line_len, TONE_1750_MUTING_PRE);
   }
@@ -617,9 +619,23 @@ else
     // elimination), create it
   if (delay_line_len > 0)
   {
+    std::cout << name() << ": Delay line (for DTMF muting etc) set to "
+              << delay_line_len << " ms" << std::endl;
     delay = new AudioDelayLine(delay_line_len);
     prev_src->registerSink(delay, true);
     prev_src = delay;
+  }
+
+  LADSPAPluginLoader ladspa_plug_loader;
+  if (!ladspa_plug_loader.load(cfg(), name()))
+  {
+    delete ladspa_plug_loader.chainSink();
+    return false;
+  }
+  if (ladspa_plug_loader.chainSink() != nullptr)
+  {
+    prev_src->registerSink(ladspa_plug_loader.chainSink(), true);
+    prev_src = ladspa_plug_loader.chainSource();
   }
 
     // Add a limiter to smoothly limit the audio before hard clipping it
@@ -655,7 +671,7 @@ else
   
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
-  setHandler(prev_src);
+  setAudioSourceHandler(prev_src);
   
   cfg().getValue(name(), "AUDIO_DEV_KEEP_OPEN", audio_dev_keep_open);
 

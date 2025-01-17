@@ -1,4 +1,48 @@
- 1.8.0 -- ?? ??? ????
+ 1.9.0 -- ?? ??? ????
+----------------------
+
+* Change reflector config at runtime.
+  Contribution from DL1HRC/Adi, following an idea from DJ1JAY/Jens to change
+  some SvxReflector parameters at runtime.
+
+* The reflector connection is now authenticated using X.509 certificates. Both
+  the server and the client requires authentication. The AUTH_KEY
+  authentication method that were previously used is deprecated. The
+  certificate generation process is mostly automated. The contents of the
+  certificate can be customized using the configuration variables with name
+  prefix CERT_. Default values are good in most cases. CERT_EMAIL may be good
+  to specify so that the SvxLink node owner can be contacted. Ask the
+  reflector sysop what the convention is.
+  Both the TCP and UDP connections are encrypted. The default is to use
+  the AES128 cipher in GCM mode.
+  The reflector server need to be updated to use this version of SvxLink on a
+  reflector client. If the server is older and only support the version 2
+  protocol, you must use TYPE=ReflectorV2 in the ReflectorLogic config.
+  All PKI (Public Key Infrastructure) files will be stored in the directory
+  given by the CERT_PKI_DIR configuration variable. The path defaults to
+  something like /var/lib/svxlink/pki but the exact default path depend on
+  build configuration. In any case, that path need to be created and made
+  writable for SvxLink. That should be done automatically by "make install".
+  Building SvxLink also require a new dependency on OpenSSL so the development
+  package for that library need to be installed (e.g. install package
+  libssl-dev if on a Debian based distro).
+
+* The SvxReflector now check the callsign for a connecting node against the
+  ACCEPT_CALLSIGN and REJECT_CALLSIGN configuration variables. That is done
+  for both AUTH_KEY connections and certificate connections.
+
+* It's now possible to apply LADSPA plugin audio processing to the transmitted
+  audio. Plugins are set up using the LADSPA_PLUGINS configuration variable.
+
+* Added a more verbose way to configure LADSPA plugins where the available
+  input controls are specified by name in their own configuration section.
+
+* Add --version command line option to applications svxlink, remotetrx,
+  devcal and svxreflector.
+
+
+
+ 1.8.0 -- 25 Feb 2024
 ----------------------
 
 * MetarInformation, more flexible airport announcement at the beginning of a
@@ -264,7 +308,7 @@
 
 * Bugfix in ModuleEchoLink: The INCORRECT PASSWORD message was ignored.
 
-* New global TCL function "getVar" than makes it easier to get the value of a
+* New global TCL function "getVar" that makes it easier to get the value of a
   variable that may be non-existent. If the variable does not exist a default
   value is returned instead.
 
@@ -277,6 +321,20 @@
 
 * New configuration variable TG_SELECT_INHIBIT_TIMEOUT that is used to
   separately control the TG select inhibit feature.
+
+* Bugfix for the 1750_MUTING configuration variable. Setting it to 0 did not
+  disable the feature. It had to be commented out.
+
+* It's now possible to use LADSPA plugins to shape received audio. Fore more
+  information have a look at the documentation for the LADSPA_PLUGINS
+  configuration variable.
+
+
+
+ 1.7.0-1 -- 10 Mar 2021
+------------------------
+
+* Bugfix in SvxReflector authentication code. Upgrade immediately.
 
 
 
