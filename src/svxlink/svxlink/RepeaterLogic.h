@@ -121,9 +121,16 @@ class RepeaterLogic : public Logic
 {
   public:
     /**
-     * @brief 	Default constructor
+     * @brief 	Constuctor
+     * @param 	cfg A previously initialized config object
+     * @param 	name The name of this logic
      */
-    RepeaterLogic(void);
+    RepeaterLogic(Async::Config& cfg, const std::string& name);
+
+    /**
+     * @brief 	Destructor
+     */
+    ~RepeaterLogic(void);
 
     /**
      * @brief 	Initialize this logic
@@ -205,8 +212,9 @@ class RepeaterLogic : public Logic
     std::string     open_reason;
     int		    ident_nag_min_time;
     Async::Timer    ident_nag_timer;
-    uint32_t        delayed_tg_activation;
-    Async::Timer    open_on_ctcss_timer;
+    Async::Timer    sql_flap_block_timer;
+    int             sql_flap_block_time;
+    bool            repeater_up_blocked;
 
     void idleTimeout(Async::Timer *t);
     void setIdle(bool idle);
@@ -217,6 +225,7 @@ class RepeaterLogic : public Logic
     void openOnSqlTimerExpired(Async::Timer *t);
     void activateOnOpenOrClose(SqlFlank flank);
     void identNag(Async::Timer *t);
+    void blocktimeExpired(Async::Timer *t);
 
 };  /* class RepeaterLogic */
 
