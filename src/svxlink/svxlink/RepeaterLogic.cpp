@@ -145,6 +145,7 @@ RepeaterLogic::RepeaterLogic(void)
     short_sql_open_cnt(0), sql_flap_sup_min_time(1000),
     sql_flap_sup_max_cnt(0), rgr_enable(true), open_reason("?"),
     ident_nag_min_time(2000), ident_nag_timer(-1),
+    open_on_ctcss_timer(-1)
     sql_flap_block_timer(60000, Timer::TYPE_ONESHOT, false),
     sql_flap_block_time(0), repeater_up_blocked(false)
 {
@@ -168,10 +169,6 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
     return false;
   }
 
-  float open_on_ctcss_fq = 0;
-  int open_on_ctcss_duration = 0;
-  int required_1750_duration = 0;
-
   int idle_timeout;
   if (cfg().getValue(name(), "IDLE_TIMEOUT", idle_timeout))
   {
@@ -182,12 +179,13 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
   cfg().getValue(name(), "OPEN_ON_1750", required_1750_duration);
 
   string str;
-  if (cfg().getValue(name(), "OPEN_ON_1750", str))
+  float open_on_ctcss_fq = 0;
+  int open_on_ctcss_duration = -1;
+  if (cfg().getValue(name(), "OPEN_ON_CTCSS", open_on_ctcss_duration))
   {
-    required_1750_duration = atoi(str.c_str());
+    open_on_ctcss_timer.setTimeout(open_on_ctcss_duration);
   }
-
-  if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
+  else if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
   {
     std::cerr << "*** WARNING: Deprecated syntax for the " << name()
               << "/OPEN_ON_CTCSS configuration variable. "
