@@ -144,8 +144,9 @@ RepeaterLogic::RepeaterLogic(void)
     open_sql_flank(SQL_FLANK_CLOSE),
     short_sql_open_cnt(0), sql_flap_sup_min_time(1000),
     sql_flap_sup_max_cnt(0), rgr_enable(true), open_reason("?"),
-    ident_nag_min_time(2000), ident_nag_timer(-1), delayed_tg_activation(0),
-    open_on_ctcss_timer(-1)
+    ident_nag_min_time(2000), ident_nag_timer(-1),
+    sql_flap_block_timer(60000, Timer::TYPE_ONESHOT, false),
+    sql_flap_block_time(0), repeater_up_blocked(false)
 {
   up_timer.expired.connect(mem_fun(*this, &RepeaterLogic::idleTimeout));
   open_on_sql_timer.expired.connect(
@@ -155,6 +156,8 @@ RepeaterLogic::RepeaterLogic(void)
   ident_nag_timer.expired.connect(mem_fun(*this, &RepeaterLogic::identNag));
   timerclear(&rpt_close_timestamp);
   timerclear(&sql_up_timestamp);
+  sql_flap_block_timer.expired.connect(mem_fun(*this,
+        &RepeaterLogic::blocktimeExpired));
 } /* RepeaterLogic::RepeaterLogic */
 
 
@@ -304,7 +307,13 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
   {
     ident_nag_min_time = atoi(str.c_str());
   }
-  
+
+  if (cfg().getValue(name(), "SQL_FLAP_BLOCK_TIME", str))
+  {
+    sql_flap_block_time = 1000 * atoi(str.c_str());
+    sql_flap_block_timer.setTimeout(sql_flap_block_time);
+  }
+
   rx().toneDetected.connect(mem_fun(*this, &RepeaterLogic::detectedTone));
   
   if (required_1750_duration > 0)
@@ -553,7 +562,15 @@ void RepeaterLogic::setUp(bool up, string reason)
   {
     return;
   }
-  
+
+  if (up && repeater_up_blocked)
+  {
+    cout << "*** Repeater_up is blocked due to sql_flap_block_function,"
+         << " should work again in at least " << sql_flap_block_time
+         << " seconds." << endl;
+    return;
+  }
+
   if (up)
   {
     short_sql_open_cnt = 0;
@@ -647,6 +664,11 @@ void RepeaterLogic::squelchOpen(bool is_open)
                  << sql_flap_sup_max_cnt << " squelch openings less than "
 		 << sql_flap_sup_min_time << "ms in length detected.\n";
 	    setUp(false, "SQL_FLAP_SUP");
+	    if (sql_flap_block_time > 0)
+	    {
+	      repeater_up_blocked = true;
+	      sql_flap_block_timer.setEnable(true);
+	    }
 	  }
 	}
 	else
@@ -786,6 +808,11 @@ void RepeaterLogic::identNag(Timer *t)
 } /* RepeaterLogic::identNag */
 
 
+void RepeaterLogic::blocktimeExpired(Timer *t)
+{
+  repeater_up_blocked = false;
+  cout << "*** Repeater blocktime expired." << endl;
+} /* RepeaterLogic::blocktimeExpired */
 
 /*
  * This file has not been truncated
