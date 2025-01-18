@@ -280,7 +280,7 @@ LocalTx::~LocalTx(void)
 
 
 bool LocalTx::initialize(void)
-{
+  {
   string value;
 
   char tx_id = '\0';
