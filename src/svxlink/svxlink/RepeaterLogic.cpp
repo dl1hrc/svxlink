@@ -168,6 +168,10 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
     return false;
   }
 
+  float open_on_ctcss_fq = 0;
+  int open_on_ctcss_duration = 0;
+  int required_1750_duration = 0;
+
   int idle_timeout;
   if (cfg().getValue(name(), "IDLE_TIMEOUT", idle_timeout))
   {
@@ -178,13 +182,12 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
   cfg().getValue(name(), "OPEN_ON_1750", required_1750_duration);
 
   string str;
-  float open_on_ctcss_fq = 0;
-  int open_on_ctcss_duration = -1;
-  if (cfg().getValue(name(), "OPEN_ON_CTCSS", open_on_ctcss_duration))
+  if (cfg().getValue(name(), "OPEN_ON_1750", str))
   {
-    open_on_ctcss_timer.setTimeout(open_on_ctcss_duration);
+    required_1750_duration = atoi(str.c_str());
   }
-  else if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
+
+  if (cfg().getValue(name(), "OPEN_ON_CTCSS", str))
   {
     std::cerr << "*** WARNING: Deprecated syntax for the " << name()
               << "/OPEN_ON_CTCSS configuration variable. "
