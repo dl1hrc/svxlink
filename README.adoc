@@ -18,7 +18,9 @@ unter /home/svxlink:
 git clone https://github.com/DB6KT/svxlink.git
 
 cd /svxlink/src
+
 mkdir build
+
 cd /build
 
 Für den Fall, dass das build-Verzeichnis schon von früheren Installationsversuchen existieren sollte und nicht leer ist, empfiehlt sich zunächst ein:
