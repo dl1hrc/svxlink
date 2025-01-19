@@ -120,11 +120,11 @@ class PeakMeter : public AudioPassthrough
 {
   public:
     PeakMeter(const string& name) : name(name) {}
-    
+
     int writeSamples(const float *samples, int count)
     {
       int ret = sinkWriteSamples(samples, count);
-      
+
       int i;
       for (i=0; i<ret; ++i)
       {
@@ -133,19 +133,19 @@ class PeakMeter : public AudioPassthrough
 	  break;
 	}
       }
-      
+
       if (i < ret)
       {
       	cout << name
 	     << ": Distortion detected! Please lower the input volume!\n";
       }
-      
+
       return ret;
     }
-  
+
   private:
     string name;
-    
+
 };
 
 
@@ -261,10 +261,10 @@ bool LocalRxBase::initialize(void)
   {
     return false;
   }
-  
+
   bool deemphasis = false;
   cfg().getValue(name(), "DEEMPHASIS", deemphasis);
-  
+
   int delay_line_len = 0;
   bool  mute_1750 = false;
   cfg().getValue(name(), "1750_MUTING", mute_1750);
@@ -278,12 +278,12 @@ bool LocalRxBase::initialize(void)
   {
     delay_line_len = max(delay_line_len, sql_tail_elim);
   }
-  
+
   cfg().getValue(name(), "PREAMP", preamp_gain);
-  
+
   bool peak_meter = false;
   cfg().getValue(name(), "PEAK_METER", peak_meter);
-  
+
     // Get the audio source object
   AudioSource *prev_src = audioSource();
   assert(prev_src != 0);
@@ -318,7 +318,7 @@ bool LocalRxBase::initialize(void)
     }
     raw_audio_splitter->addSink(udp, true);
   }
-  
+
     // If a preamp was configured, create it
   if (preamp_gain != 0)
   {
@@ -327,7 +327,7 @@ bool LocalRxBase::initialize(void)
     prev_src->registerSink(preamp, true);
     prev_src = preamp;
   }
-  
+
     // If a peak meter was configured, create it
   if (peak_meter)
   {
@@ -335,7 +335,7 @@ bool LocalRxBase::initialize(void)
     prev_src->registerSink(peak_meter, true);
     prev_src = peak_meter;
   }
-  
+
     // If the sound card sample rate is higher than 16kHz (48kHz assumed),
     // decimate it down to 16kHz
   if (audioSampleRate() > 16000)
@@ -395,7 +395,7 @@ bool LocalRxBase::initialize(void)
     prev_src->registerSink(deemph_filt, true);
     prev_src = deemph_filt;
   }
-  
+
     // Create a splitter to distribute full bandwidth audio to all consumers
   fullband_splitter = new AudioSplitter;
   prev_src->registerSink(fullband_splitter, true);
@@ -524,6 +524,16 @@ bool LocalRxBase::initialize(void)
 
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
+  string filterdesc;
+  if (cfg().getValue(name(),"RX_AUDIO_FILTER",filterdesc))
+  {
+  AudioFilter *voiceband_filter = new AudioFilter(filterdesc);
+  prev_src->registerSink(voiceband_filter, true);
+  prev_src = voiceband_filter;
+  }
+  else
+{
+
 #if (INTERNAL_SAMPLE_RATE == 16000)
   AudioFilter *voiceband_filter = new AudioFilter("BpCh12/-0.1/300-5000");
 #else
@@ -531,7 +541,7 @@ bool LocalRxBase::initialize(void)
 #endif
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
-
+}
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
   AudioSplitter *voiceband_splitter = new AudioSplitter;
@@ -564,7 +574,7 @@ bool LocalRxBase::initialize(void)
       delay_line_len = max(delay_line_len, dtmf_muting_pre);
     }
   }
-  
+
     // Create a selective multiple tone detector object
   string sel5_dec_type("NONE");
   cfg().getValue(name(), "SEL5_DEC_TYPE", sel5_dec_type);
@@ -625,15 +635,17 @@ bool LocalRxBase::initialize(void)
   {
     AudioCompressor *limit = new AudioCompressor;
     limit->setThreshold(limiter_thresh);
-    limit->setRatio(0.1);
-    limit->setAttack(2);
-    limit->setDecay(20);
+    limit->setRatio(0.05);
+    limit->setAttack(0.1);
+    limit->setDecay(50);
     limit->setOutputGain(1);
     prev_src->registerSink(limit, true);
     prev_src = limit;
   }
+    else
+{
 
-    // Clip audio to limit its amplitude
+   // Clip audio to limit its amplitude
   AudioClipper *clipper = new AudioClipper;
   clipper->setClipLevel(0.98);
   prev_src->registerSink(clipper, true);
@@ -647,11 +659,11 @@ bool LocalRxBase::initialize(void)
 #endif
   prev_src->registerSink(splatter_filter, true);
   prev_src = splatter_filter;
-  
+}
     // Set the previous audio pipe object to handle audio distribution for
     // the LocalRxBase class
   setAudioSourceHandler(prev_src);
-  
+
   cfg().getValue(name(), "AUDIO_DEV_KEEP_OPEN", audio_dev_keep_open);
 
     // Open the audio device for reading
@@ -660,7 +672,7 @@ bool LocalRxBase::initialize(void)
     // FIXME: Cleanup?
     return false;
   }
-  
+
   if (mute_1750)
   {
     ToneDetector *calldet = new ToneDetector(1750, 50, 100);
@@ -762,9 +774,9 @@ bool LocalRxBase::addToneDetector(float fq, int bw, float thresh,
   det->setDetectOverlapPercent(75);
   det->setDetectToneFrequencyTolerancePercent(50.0f * bw / fq);
   det->detected.connect(sigc::mem_fun(*this, &LocalRxBase::onToneDetected));
-  
+
   tone_dets->addSink(det, true);
-  
+
   return true;
 
 } /* LocalRxBase::addToneDetector */
@@ -778,7 +790,7 @@ float LocalRxBase::signalStrength(void) const
   }
   return siglevdet->lastSiglev();
 } /* LocalRxBase::signalStrength */
-    
+
 
 char LocalRxBase::sqlRxId(void) const
 {

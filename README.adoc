@@ -1,36 +1,45 @@
 SvxLink
 =======
 
-image:https://travis-ci.org/sm0svx/svxlink.svg?branch=master["Build Status", link="https://travis-ci.org/sm0svx/svxlink"]
-image:https://badges.gitter.im/Join%20Chat.svg[link="https://gitter.im/sm0svx/svxlink?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge"]
+Die hier zur Verfügung gestellte Version svxlink ist speziell für die Repeater im SACHSENLINK 
+erstellt worden. 
+Dazu sind einige Änderungen in den Audiofiltern erfoderlich gewesen um eine gleiche Audioqualität über HF sowie 
+über das Netzwerk zu garantieren. Vielen Dank an Uwe, DL1JAE für die Arbeit an der Audio und Adi, DL1HRC 
+für die Softwarearbeit an svxlink.
 
-SvxLink is a project that develops software targeting the ham radio community.
-It started out as an EchoLink application for Linux back in 2003 but has now
-evolved to be something much more advanced.
+Abhängigkeiten installieren (ich gehe von einer Arbeistumbegnung mit einem Raspberry Pi mit DEBIAN/Rasbian aus):
+ 
+sudo apt install gcc g++ make cmake libgcrypt20-dev libgsm1-dev libsigc++-2.0-dev tcl-dev git libspeex-dev libasound2-dev libpopt-dev libssl-dev libopus-dev groff libcurl4-openssl-dev libjsoncpp-dev gpiod libgpiod-dev
 
-== SvxLink Server ==
-The SvxLink Server is a general purpose voice services system, which when
-connected to a transceiver, can act as both an advanced repeater system and can
-also operate on a simplex channel. One could call it a radio operating system.
+sudo apt install alsa-base alsa-utils
 
-SvxLink is very extensible and modular. Voice services are implemented as
-modules which are isolated from each other.  Modules can be implemented in
-either C++ or TCL. Examples of modules are:
+unter /home/svxlink:
 
-* *Help*               -- A help system
-* *Parrot*             -- Play back everything that is received
-* *EchoLink*           -- Connect to other EchoLink stations
-* *DtmfRepeater*       -- Repeater received DTMF digits
-* *TclVoiceMail*       -- Send voice mail to other local users
-* *PropagationMonitor* -- Announce propagation warnings from dxmaps.com
-* *SelCall*            -- Send selective calling sequences by entering DTMF codes
-* *MetarInformation*   -- Play airport weather information
-* *Frn*                -- Connect to Free Radio Network (FRN) servers
-* *Trx*                -- Remote control tranceivers using DTMF
+git clone https://github.com/DB6KT/svxlink.git
 
-== Qtel ==
-Qtel, the Qt EchoLink client, is a graphical application used to access the
-EchoLink network.
+cd /svxlink/src
+
+mkdir build
+
+cd /build
+
+Für den Fall, dass das build-Verzeichnis schon von früheren Installationsversuchen existieren sollte und nicht leer ist, empfiehlt sich zunächst ein:
+
+make clean
+
+danach weiter mit:
+
+cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DWITH_SYSTEMD=ON -DCMAKE_BUILD_TYPE=Release ..
+
+make
+
+sudo make install
+
+ferdsch!
+
+ACHTUNG - bitte auch die Erweiterungen installieren:
+
+https://github.com/DB6KT/SachsLinkContrib.git
 
 == Resources ==
 These are some of the resources connected to SvxLink:
