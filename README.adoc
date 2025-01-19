@@ -14,6 +14,7 @@ sudo apt install gcc g++ make cmake libgcrypt20-dev libgsm1-dev libsigc++-2.0-de
 sudo apt install alsa-base alsa-utils
 
 unter /home/svxlink:
+
 git clone https://github.com/DB6KT/svxlink.git
 
 cd /svxlink/src
