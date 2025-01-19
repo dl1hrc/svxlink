@@ -85,7 +85,7 @@ namespace Async
  ****************************************************************************/
 
 class Module;
-
+  
 
 /****************************************************************************
  *
@@ -147,7 +147,7 @@ class RepeaterLogic : public Logic
      * @return	Returns \em true if the activation went well or \em false if not
      */
     virtual bool activateModule(Module *module);
-
+    
     /**
      * @brief   Set the node to offline or online
      * @param   online Set to \em true to set the node online
@@ -184,7 +184,7 @@ class RepeaterLogic : public Logic
     {
       SQL_FLANK_OPEN, SQL_FLANK_CLOSE
     } SqlFlank;
-
+    
     bool      	    repeater_is_up;
     Async::Timer    up_timer;
     Async::Timer    idle_sound_timer;
@@ -207,9 +207,6 @@ class RepeaterLogic : public Logic
     Async::Timer    ident_nag_timer;
     uint32_t        delayed_tg_activation;
     Async::Timer    open_on_ctcss_timer;
-    Async::Timer    sql_flap_block_timer;
-    int             sql_flap_block_time;
-    bool            repeater_up_blocked;
 
     void idleTimeout(Async::Timer *t);
     void setIdle(bool idle);
@@ -220,7 +217,6 @@ class RepeaterLogic : public Logic
     void openOnSqlTimerExpired(Async::Timer *t);
     void activateOnOpenOrClose(SqlFlank flank);
     void identNag(Async::Timer *t);
-    void blocktimeExpired(Async::Timer *t);
 
 };  /* class RepeaterLogic */
 
