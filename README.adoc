@@ -1,6 +1,9 @@
 SvxLink
 =======
-Die hier zur Verfügung gestellte Version svxlink ist speziell für die Repeater im SACHSENLINK erstellt worden. Dazu sind einige Änderungen in den Audiofiltern erfoderlich gewesen um eine gleiche Audioqualität über HF sowie über das Netzwerk zu garantieren. Vielen Dank an Uwe, DL1JAE für die Arbeit an der Audio und Adi, DL1HRC für die Softwarearbeit an svxlink.
+Die hier zur Verfügung gestellte Version svxlink ist speziell für die Repeater im SACHSENLINK erstellt worden. 
+Dazu sind einige Änderungen in den Audiofiltern erfoderlich gewesen um eine gleiche Audioqualität über HF sowie 
+über das Netzwerk zu garantieren. Vielen Dank an Uwe, DL1JAE für die Arbeit an der Audio und Adi, DL1HRC 
+für die Softwarearbeit an svxlink.
 
 Abhängigkeiten installieren (ich gehe von einer Arbeistumbegnung mit einem Raspberry Pi mit DEBIAN/Rasbian aus):
  
