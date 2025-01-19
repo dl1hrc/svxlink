@@ -11,7 +11,7 @@ Abhängigkeiten installieren (ich gehe von einer Arbeistumbegnung mit einem Rasp
  
 sudo apt install gcc g++ make cmake libgcrypt20-dev libgsm1-dev libsigc++-2.0-dev tcl-dev git libspeex-dev libasound2-dev libpopt-dev libssl-dev libopus-dev groff libcurl4-openssl-dev libjsoncpp-dev gpiod libgpiod-dev
 
-sudo apt-get install alsa-base alsa-utils
+sudo apt install alsa-base alsa-utils
 
 unter /home/svxlink:
 git clone https://github.com/DB6KT/svxlink.git
