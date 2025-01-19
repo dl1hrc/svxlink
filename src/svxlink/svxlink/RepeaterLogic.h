@@ -207,6 +207,9 @@ class RepeaterLogic : public Logic
     Async::Timer    ident_nag_timer;
     uint32_t        delayed_tg_activation;
     Async::Timer    open_on_ctcss_timer;
+    Async::Timer    sql_flap_block_timer;
+    int             sql_flap_block_time;
+    bool            repeater_up_blocked;
 
     void idleTimeout(Async::Timer *t);
     void setIdle(bool idle);
@@ -217,6 +220,7 @@ class RepeaterLogic : public Logic
     void openOnSqlTimerExpired(Async::Timer *t);
     void activateOnOpenOrClose(SqlFlank flank);
     void identNag(Async::Timer *t);
+    void blocktimeExpired(Async::Timer *t);
 
 };  /* class RepeaterLogic */
 
