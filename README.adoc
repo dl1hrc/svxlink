@@ -24,6 +24,8 @@ Für den Fall, dass das build-Verzeichnis schon von früheren Installationsversu
 
 make clean
 
+danach weiter mit:
+
 cmake -DUSE_QT=OFF -DCMAKE_INSTALL_PREFIX=/usr -DSYSCONF_INSTALL_DIR=/etc -DLOCAL_STATE_DIR=/var -DWITH_SYSTEMD=ON -DCMAKE_BUILD_TYPE=Release ..
 
 make
