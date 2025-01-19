@@ -9,7 +9,7 @@ für die Softwarearbeit an svxlink.
 
 Abhängigkeiten installieren (ich gehe von einer Arbeistumbegnung mit einem Raspberry Pi mit DEBIAN/Rasbian aus):
  
-sudo apt install gcc g++ wget make cmake libgcrypt20-dev libgsm1-dev libsigc++-2.0-dev tcl-dev git libspeex-dev libasound2-dev libpopt-dev libssl-dev libopus-dev groff libcurl4-openssl-dev libjsoncpp-dev gpiod libgpiod-dev
+sudo apt install gcc g++ make cmake libgcrypt20-dev libgsm1-dev libsigc++-2.0-dev tcl-dev git libspeex-dev libasound2-dev libpopt-dev libssl-dev libopus-dev groff libcurl4-openssl-dev libjsoncpp-dev gpiod libgpiod-dev
 
 sudo apt-get install alsa-base alsa-utils
 
