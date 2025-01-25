@@ -2422,8 +2422,8 @@ void TetraLogic::sendWelcomeSds(string tsi, short r4s)
  */
 int TetraLogic::handleCci(std::string m_message)
 {
-  log(LOGTRACE, "TetraLogic::handleCci: " + m_message);
-  squelchOpen(true);
+  log(LOGTRACE, "TetraLogic::handleCci: " + m_message + ", is_tx=" + (is_tx ? "TRUE":"FALSE"));
+  //squelchOpen(true);
   size_t f = m_message.find("+CTCC: ");
   if (f != string::npos)
   {
