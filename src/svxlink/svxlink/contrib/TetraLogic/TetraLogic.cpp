@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "19112024"
+#define TETRA_LOGIC_VERSION "29012025"
 
 /****************************************************************************
  *
@@ -2422,8 +2422,8 @@ void TetraLogic::sendWelcomeSds(string tsi, short r4s)
  */
 int TetraLogic::handleCci(std::string m_message)
 {
-  log(LOGTRACE, "TetraLogic::handleCci: " + m_message);
-  squelchOpen(true);
+  log(LOGTRACE, "TetraLogic::handleCci: " + m_message + ", is_tx=" + (is_tx ? "TRUE":"FALSE"));
+  //squelchOpen(true);
   size_t f = m_message.find("+CTCC: ");
   if (f != string::npos)
   {
@@ -2553,19 +2553,37 @@ void TetraLogic::handleRssi(std::string m_message)
   size_t f = m_message.find("+CSQ: ");
   if (f != string::npos)
   {
+    std::string m = "New Rssi value measured: ";
+    stringstream ss;
+    ss << "rssi ";
     uint32_t ti = time(NULL);
     m_message.erase(0,6);
-    int rssi = -113 + 2 * getNextVal(m_message);
+
+    int rssi = getNextVal(m_message);
+
+    checkReg();
+
+    // if =99 no TMO network available
+    if (rssi == 99)
+    {
+      rssi = 0;
+      m += "No TMO network connectable or not reliable.";
+      log(LOGDEBUG, m);
+
+      ss << "-127";
+      processEvent(ss.str());
+      return;
+    }
+
+    rssi = -113 + 2 * rssi;
     rssi_list.push_back(rssi);
     if (rssi_list.size() > 20) rssi_list.erase(rssi_list.begin());
     if (rssi < min_rssi) min_rssi = rssi; // store min rssi value
     if (rssi > max_rssi) max_rssi = rssi; // store max rssi value
 
-    stringstream ss;
-    ss << "rssi " << rssi;
+    ss << rssi;
     processEvent(ss.str());
 
-    std::string m = "New Rssi value measured: ";
     m += to_string(rssi);
     m += " dBm (";
     m += getRssiDescription(rssi);
@@ -2585,9 +2603,6 @@ void TetraLogic::handleRssi(std::string m_message)
     t_rssi["message"] = "Rssi:info";
     t_rssi["last_activity"] = ti;
     publishInfo("Rssi:info", t_rssi);
-
-    //log(LOGDEBUG, jsonToString(t_rssi));
-    checkReg();
 
     // no action if the value is above the defined limit
     if (rssi > qos_limit) return;

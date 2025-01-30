@@ -6,7 +6,7 @@
 
 \verbatim
 SvxReflector - An audio reflector for connecting SvxLink Servers
-Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -202,6 +202,27 @@ namespace {
 
 /****************************************************************************
  *
+ * Public static functions
+ *
+ ****************************************************************************/
+
+time_t Reflector::timeToRenewCert(const Async::SslX509& cert)
+{
+  if (cert.isNull())
+  {
+    return 0;
+  }
+
+  int days=0, seconds=0;
+  cert.validityTime(days, seconds);
+  time_t renew_time = cert.notBefore() +
+    (static_cast<time_t>(days)*24*3600 + seconds)*RENEW_AFTER;
+  return renew_time;
+} /* Reflector::timeToRenewCert */
+
+
+/****************************************************************************
+ *
  * Public member functions
  *
  ****************************************************************************/
@@ -262,6 +283,7 @@ bool Reflector::initialize(Async::Config &cfg)
   std::string listen_port("5300");
   cfg.getValue("GLOBAL", "LISTEN_PORT", listen_port);
   m_srv = new TcpServer<FramedTcpConnection>(listen_port);
+  m_srv->setConnectionThrottling(10, 0.1, 1000);
   m_srv->clientConnected.connect(
       mem_fun(*this, &Reflector::clientConnected));
   m_srv->clientDisconnected.connect(
@@ -842,7 +864,7 @@ Async::SslX509 Reflector::loadClientCertificate(const std::string& callsign)
   Async::SslX509 cert;
   if (!cert.readPemFile(m_certs_dir + "/" + callsign + ".crt") ||
       cert.isNull() ||
-      !cert.verify(m_issue_ca_pkey) ||
+      //!cert.verify(m_issue_ca_pkey) ||
       !cert.timeIsWithinRange())
   {
     return nullptr;
@@ -958,10 +980,10 @@ Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
     return nullptr;
   }
 
-  std::string crtfile(m_certs_dir + "/" + callsign + ".crt");
-  Async::SslX509 cert;
-  if (!cert.readPemFile(crtfile) || !cert.verify(m_issue_ca_pkey) ||
-      !cert.timeIsWithinRange() || (cert.publicKey() != req.publicKey()))
+  Async::SslX509 cert = loadClientCertificate(callsign);
+  if (!cert.isNull() &&
+      ((cert.publicKey() != req.publicKey()) ||
+       (timeToRenewCert(cert) <= std::time(NULL))))
   {
     cert.set(nullptr);
   }
@@ -1041,8 +1063,8 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
   {
     std::cout << con->remoteHost() << ":" << con->remotePort() << ": ";
   }
-  std::cout << "Client disconnected: " << TcpConnection::disconnectReasonStr(reason)
-       << endl;
+  std::cout << "Client disconnected: "
+            << TcpConnection::disconnectReasonStr(reason) << std::endl;
 
   m_client_con_map.erase(it);
 
@@ -1051,7 +1073,8 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
     broadcastMsg(MsgNodeLeft(client->callsign()),
         ReflectorClient::ExceptFilter(client));
   }
-  Application::app().runTask([=]{ delete client; });
+  //Application::app().runTask([=]{ delete client; });
+  delete client;
 } /* Reflector::clientDisconnected */
 
 
@@ -1810,6 +1833,33 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
       goto write_status;
     }
     m_cfg->setValue(section, tag, value);
+  }
+  else if (cmd == "NODE")
+  {
+    std::string subcmd, callsign;
+    unsigned blocktime;
+    if (!(ss >> subcmd >> callsign >> blocktime))
+    {
+      errss << "Invalid NODE PTY command '" << cmdline << "'. "
+               "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+      goto write_status;
+    }
+    if (subcmd == "BLOCK")
+    {
+      auto node = ReflectorClient::lookup(callsign);
+      if (node == nullptr)
+      {
+        errss << "Could not find node " << callsign;
+        goto write_status;
+      }
+      node->setBlock(blocktime);
+    }
+    else
+    {
+      errss << "Invalid NODE PTY command '" << cmdline << "'. "
+               "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+      goto write_status;
+    }
   }
   else if (cmd == "CA")
   {

@@ -36,6 +36,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <iomanip>
 #include <algorithm>
 #include <cerrno>
+#include <ctime>
 #include <iterator>
 #include <fstream>
 #include <iostream>
@@ -333,6 +334,15 @@ void ReflectorClient::sendUdpMsg(const ReflectorUdpMsg &msg)
 
 void ReflectorClient::setBlock(unsigned blocktime)
 {
+  if (blocktime > 0)
+  {
+    std::cout << m_callsign << ": Blocking talker for " << blocktime
+              << " seconds" << std::endl;
+  }
+  else if (m_blocktime > 0)
+  {
+    std::cout << m_callsign << ": Unblocking talker" << std::endl;
+  }
   m_blocktime = blocktime;
   m_remaining_blocktime = blocktime;
 } /* ReflectorClient::setBlock */
@@ -443,15 +453,10 @@ void ReflectorClient::onSslConnectionReady(TcpConnection *con)
     return;
   }
 
-  int days=0, seconds=0;
-  peer_cert.validityTime(days, seconds);
-  time_t renew_time = peer_cert.notBefore() +
-      (static_cast<time_t>(days)*24*3600 + seconds)*RENEW_AFTER;
-  //std::cout << "### Client cert days=" << days << " seconds="
-  //          << seconds << " renew_in=" << (renew_time - time(NULL))
-  //          << std::endl;
+  time_t renew_time = std::max(
+      std::time(NULL) + 600,
+      Reflector::timeToRenewCert(peer_cert));
   m_renew_cert_timer.setTimeout(renew_time);
-  m_renew_cert_timer.setExpireOffset(10000);
   m_renew_cert_timer.start();
 
   std::cout << callsign << ": " << peer_cert.subjectNameString() << std::endl;
@@ -1252,7 +1257,7 @@ void ReflectorClient::handleHeartbeat(Async::Timer *t)
   {
     if (m_remaining_blocktime == 0)
     {
-      m_blocktime = 0;
+      setBlock(0);
     }
     else
     {
