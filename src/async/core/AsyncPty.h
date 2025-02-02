@@ -6,7 +6,7 @@
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -47,6 +47,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <AsyncTimer.h>
+#include <AsyncFdWatch.h>
 
 
 /****************************************************************************
@@ -81,8 +82,7 @@ namespace Async
  *
  ****************************************************************************/
 
-class FdWatch;
-  
+
 
 /****************************************************************************
  *
@@ -125,15 +125,20 @@ class Pty : public sigc::trackable
 {
   public:
     /**
-     * @brief 	Default constructor
+     * @brief   Constructor
+     * @param   slave_link Path to the slave softlink
      */
-    Pty(const std::string &slave_link="");
-  
+    Pty(const std::string& slave_link="");
+
     /**
      * @brief 	Destructor
      */
     ~Pty(void);
 
+    /**
+     * @brief   Turn line buffering on or off
+     * @param   line_buffered Set to be line buffered if \em true
+     */
     void setLineBuffered(bool line_buffered)
     {
       m_is_line_buffered = line_buffered;
@@ -181,10 +186,32 @@ class Pty : public sigc::trackable
     ssize_t write(const void *buf, size_t count);
 
     /**
+     * @brief   Write a string to the PTY
+     * @param   str A string to write
+     * @return  On success, the number of bytes written is returned (zero
+     *          indicates nothing was written).  On error, -1 is returned,
+     *          and errno is set appropriately.
+     *
+     * Use this function to write a string to the PTY. If the slave end of the
+     * PTY is not open, the written string will just be discarded and the
+     * string length is used as the return value.
+     */
+    ssize_t write(const std::string& str)
+    {
+      return write(str.c_str(), str.size());
+    }
+
+    /**
      * @brief   Check if the PTY is open or not
      * @return  Returns \em true if the PTY has been successfully opened
      */
-    bool isOpen(void) const { return master >= 0; }
+    bool isOpen(void) const { return m_master >= 0; }
+
+    /**
+     * @brief   Get the path to the slave PTS device
+     * @return  Returns the slave path after the PTY has been opened
+     */
+    const std::string& slavePath(void) const { return m_slave_path; }
 
     /**
      * @brief   Signal that is emitted when data has been received
@@ -198,12 +225,13 @@ class Pty : public sigc::trackable
   private:
     static const int POLLHUP_CHECK_INTERVAL = 100;
 
-    std::string     slave_link;
-    int     	    master;
-    Async::FdWatch  *watch;
-    Async::Timer    pollhup_timer;
-    bool            m_is_line_buffered = false;
+    std::string     m_slave_link;
+    int             m_master            = -1;
+    Async::FdWatch  m_watch;
+    Async::Timer    m_pollhup_timer;
+    bool            m_is_line_buffered  = false;
     std::string     m_line_buffer;
+    std::string     m_slave_path;
 
     Pty(const Pty&);
     Pty& operator=(const Pty&);
