@@ -1850,7 +1850,10 @@ void TetraLogic::handleCallReleased(std::string message)
 
   inTransmission = false;
 
-  registerUser(Qso.tsi); // updateuserinfo for registration at reflector
+  if (Qso.tsi != "")
+  {
+    registerUser(Qso.tsi); // updateuserinfo for registration at reflector
+  }
 
   checkSds(); // resend Sds after MS got into Rx mode
 
