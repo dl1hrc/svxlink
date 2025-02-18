@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2009 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -228,8 +228,10 @@ void AprsUdpClient::sendLocationInfo(Timer *t)
   {
     char sdes_packet[256];
     int sdes_len = buildSdesPacket(sdes_packet);
+
     if (sdes_len != 0)
     {
+      std::cout << "### AprsUdpClient::sendLocationInfo" << std::endl;
       sock.write(ip_addr, port, sdes_packet, sdes_len);
     }
   }

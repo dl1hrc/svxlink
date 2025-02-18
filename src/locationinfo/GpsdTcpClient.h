@@ -91,14 +91,14 @@ namespace Async
  ****************************************************************************/
 
 typedef struct {
-   double lat;
-   double lon;
-   float speed;
-   float altitude;
-   float climbrate;
-   float track;
-   uint8_t active;
+  double lat;
+  double lon;
+  float climbrate;
+  float speed;
+  float altitude;
+  float track;
 } Position;
+
 
 
 /****************************************************************************
@@ -124,7 +124,7 @@ typedef struct {
 class GpsdTcpClient : public sigc::trackable
 {
   public:
-     GpsdTcpClient(const std::string &server, int port);
+     GpsdTcpClient(const std::string &server, int port, bool debug);
 
      ~GpsdTcpClient(void);
 
@@ -137,10 +137,10 @@ class GpsdTcpClient : public sigc::trackable
 
     std::string		server;
     int			port;
+    bool		debug;
     Async::TcpClient<>* con;
     Async::Timer        *reconnect_timer;
-    Async::Timer        *poll_timer;
-    
+
     typedef std::vector<std::string> StrList;
     StrList  gpsdparams;
 

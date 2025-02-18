@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -193,7 +193,15 @@ class LocationInfo
       std::string prefix;
       std::string path;
       std::string comment;
+      std::string destination;
+      bool debug;
     };
+
+    Coordinate getCoordinate(bool isLatitude)
+    {
+      if (isLatitude) return loc_cfg.lat_pos;
+      return loc_cfg.lon_pos;
+    }
 
     static bool initialize(const Async::Config &cfg, const std::string &cfg_name);
 
@@ -209,15 +217,9 @@ class LocationInfo
 
   private:
     static LocationInfo* _instance;
-    LocationInfo() : sequence(0), aprs_stats_timer(0), sinterval(0), nmeadev(0),
-                     stored_lat(0), stored_lon(0), beacon_timer(0), offset_timer(0) {}
+    LocationInfo() : sequence(0), aprs_stats_timer(0), sinterval(0) {}
     LocationInfo(const LocationInfo&);
-    ~LocationInfo(void) { 
-      delete aprs_stats_timer;
-      delete offset_timer;
-      delete beacon_timer;
-      delete nmeadev;
-    };
+    ~LocationInfo(void) { delete aprs_stats_timer; };
 
     typedef std::list<AprsClient*> ClientList;
 
@@ -230,14 +232,13 @@ class LocationInfo
     Async::Serial *nmeadev;
     float stored_lat;
     float stored_lon;
-    Async::Timer        *beacon_timer;
-    Async::Timer        *offset_timer;
-    Position pos;
+    Position position;
     uint8_t check;
 
     bool parsePosition(const Async::Config &cfg, const std::string &name);
     bool parseLatitude(Coordinate &pos, const std::string &value);
     bool parseLongitude(Coordinate &pos, const std::string &value);
+
     bool parseStationHW(const Async::Config &cfg, const std::string &name);
     bool parsePath(const Async::Config &cfg, const std::string &name);
     int calculateRange(const Cfg &cfg);
@@ -245,7 +246,6 @@ class LocationInfo
     bool parseClientStr(std::string &host, int &port, const std::string &val);
     bool parseClients(const Async::Config &cfg, const std::string &name);
     void startStatisticsTimer(int interval);
-    void startNormalSequence(Async::Timer *t);
     void sendAprsStatistics(Async::Timer *t);
     void initExtPty(std::string ptydevice);
     void mesReceived(std::string message);
@@ -253,7 +253,6 @@ class LocationInfo
     void checkPosition(void);
     void handleNmea(std::string message);
     std::string getNextStr(std::string& h);
-    void beacontimer(const Async::Config &cfg, const std::string &name);
     float calcDistance(float lat1, float lon1, float lat2, float lon2);
     float calcAngle(float lat1, float lon1, float lat2, float lon2);
     bool initNmeaDev(const Async::Config &cfg, const std::string &name);

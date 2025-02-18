@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -88,6 +88,7 @@ namespace
  *
  ****************************************************************************/
 
+ #define NMEA_VERSION "18022025"
 
 /****************************************************************************
  *
@@ -170,7 +171,16 @@ bool LocationInfo::initialize(const Async::Config &cfg, const std::string &cfg_n
   }
 
   LocationInfo::_instance->loc_cfg.mycall  = value;
-  LocationInfo::_instance->loc_cfg.comment = cfg.getValue(cfg_name, "COMMENT");
+  cfg.getValue(cfg_name, "COMMENT", LocationInfo::_instance->loc_cfg.comment);
+
+  LocationInfo::_instance->loc_cfg.debug = false;
+  cfg.getValue(cfg_name, "DEBUG", LocationInfo::_instance->loc_cfg.debug);
+
+  unsigned dest_num = 1;
+  //cfg.getValue(cfg_name, "DESTINATION_NUM", 1U, 9U, dest_num);
+  std::stringstream dest_ss;
+  dest_ss << "APSVX" << hex << dest_num;
+  LocationInfo::_instance->loc_cfg.destination = dest_ss.str();
 
   if(cfg.getValue(cfg_name, "NMEA_DEVICE", value))
   {
@@ -185,6 +195,7 @@ bool LocationInfo::initialize(const Async::Config &cfg, const std::string &cfg_n
     init_ok &= LocationInfo::_instance->parsePosition(cfg, cfg_name);
   }
 
+  init_ok &= LocationInfo::_instance->parsePosition(cfg, cfg_name);
   init_ok &= LocationInfo::_instance->parseStationHW(cfg, cfg_name);
   init_ok &= LocationInfo::_instance->parsePath(cfg, cfg_name);
   init_ok &= LocationInfo::_instance->parseClients(cfg, cfg_name);
@@ -201,8 +212,6 @@ bool LocationInfo::initialize(const Async::Config &cfg, const std::string &cfg_n
   value = cfg.getValue(cfg_name, "PTY_PATH");
   LocationInfo::_instance->initExtPty(value);
 
-  LocationInfo::_instance->beacontimer(cfg, cfg_name);
-  
   if( !init_ok )
   {
     delete LocationInfo::_instance;
@@ -282,7 +291,7 @@ void LocationInfo::setTransmitting(const std::string &name, struct timeval tv,
                 aprs_stats[name].last_tx_sec.tv_sec) +
             (tv.tv_usec - aprs_stats[name].last_tx_sec.tv_usec)/1000000.0);
    }
-} /* LocationInfo::isTransmitting */
+} /* LocationInfo::setTransmitting */
 
 
 void LocationInfo::setReceiving(const std::string &name, struct timeval tv,
@@ -300,7 +309,8 @@ void LocationInfo::setReceiving(const std::string &name, struct timeval tv,
                 aprs_stats[name].last_rx_sec.tv_sec) +
            (tv.tv_usec - aprs_stats[name].last_rx_sec.tv_usec)/1000000.0);
    }
-} /* LocationInfo::isReceiving */
+} /* LocationInfo::setReceiving */
+
 
 /****************************************************************************
  *
@@ -462,6 +472,19 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
     success = false;
   }
 
+  int interval = 10;
+  int max = numeric_limits<int>::max();
+  if (!cfg.getValue(name, "BEACON_INTERVAL", 10, max, interval, true))
+  {
+    print_error(name, "BEACON_INTERVAL", cfg.getValue(name, "BEACON_INTERVAL"),
+                "BEACON_INTERVAL=10");
+    success = false;
+  }
+  else
+  {
+    loc_cfg.interval = 60 * 1000 * interval;
+  }
+
   loc_cfg.range = calculateRange(loc_cfg);
 
   return success;
@@ -472,7 +495,9 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
 bool LocationInfo::parsePath(const Async::Config &cfg, const string &name)
 {
     // FIXME: Verify the path syntax!
-  loc_cfg.path = cfg.getValue(name, "PATH");
+    //        http://www.aprs.org/newN/new-eu-paradigm.txt
+  loc_cfg.path = "WIDE1-1";
+  cfg.getValue(name, "PATH", loc_cfg.path);
   return true;
 } /* LocationInfo::parsePath */
 
@@ -607,7 +632,8 @@ bool LocationInfo::parseClientStr(string &host, int &port, const string &val)
 } /* LocationInfo::parseClientStr */
 
 
-void LocationInfo::startStatisticsTimer(int interval) {
+void LocationInfo::startStatisticsTimer(int interval)
+{
   delete aprs_stats_timer;
   aprs_stats_timer = new Timer(interval, Timer::TYPE_PERIODIC);
   aprs_stats_timer->setEnable(true);
@@ -692,11 +718,11 @@ void LocationInfo::initExtPty(std::string ptydevice)
   AprsPty *aprspty = new AprsPty();
   if (!aprspty->initialize(ptydevice))
   {
-    cout << "*** ERROR: initializing aprs pty device " << ptydevice << endl;
+     cout << "*** ERROR: initializing aprs pty device " << ptydevice << endl;
   }
   else
   {
-    aprspty->messageReceived.connect(mem_fun(*this,
+     aprspty->messageReceived.connect(mem_fun(*this,
                     &LocationInfo::mesReceived));
   }
 } /* LocationInfo::initExtPty */
@@ -716,6 +742,7 @@ void LocationInfo::mesReceived(std::string message)
   cout << message << endl;
 } /* LocationInfo::mesReceived */
 
+
 /****************************************************************************
  *
  * Private local functions
@@ -728,7 +755,7 @@ void LocationInfo::onNmeaReceived(char *buf, int count)
   size_t found;
   while ((found = nmeastream.find("\n")) != string::npos)
   {
-     if (found != 0)
+    if (found != 0)
     {
       handleNmea(nmeastream.substr(0, found));
     }
@@ -754,60 +781,32 @@ void LocationInfo::handleNmea(std::string message)
     std::string ns = getNextStr(message); // N||S
     std::string lon = getNextStr(message); // Longitude
     std::string ew = getNextStr(message); // E||W
-    pos.speed = atof(getNextStr(message).c_str()); // speed in kts, 72.2
-    pos.track = atof(getNextStr(message).c_str()); // course, 231.5
-    pos.lat = atoi(lat.substr(0,2).c_str()) + atof(lat.substr(2,8).c_str())/60.0;
-    if (ns[0] == 'S') pos.lat *= -1.0;
-    pos.lon = atoi(lon.substr(0,3).c_str()) + atof(lon.substr(3,8).c_str())/60.0;
-    if (ew[0] == 'W') pos.lon *= -1.0;
+    position.speed = atof(getNextStr(message).c_str()); // speed in kts, 72.2
+    position.track = atof(getNextStr(message).c_str()); // course, 231.5
+    position.lat = atoi(lat.substr(0,2).c_str()) + atof(lat.substr(2,8).c_str())/60.0;
+    if (ns[0] == 'S') position.lat *= -1.0;
+    position.lon = atoi(lon.substr(0,3).c_str()) + atof(lon.substr(3,8).c_str())/60.0;
+    if (ew[0] == 'W') position.lon *= -1.0;
     checkPosition();
+    if (loc_cfg.debug)
+    {
+      cout << "NMEA: Latitude=" << lat << ", Longitude=" << lon << ", Speed="
+           << position.speed << endl;
+    }
   }
 } /* LocationInfo::handleNmea */
 
 
-void LocationInfo::beacontimer(const Config &cfg, const std::string &name)
-{
-
-  int interval = 10;
-  int max = numeric_limits<int>::max();
-
-  if (!cfg.getValue(name, "BEACON_INTERVAL", 10, max, interval, true))
-  {
-    print_error(name, "BEACON_INTERVAL", cfg.getValue(name, "BEACON_INTERVAL"),
-                "BEACON_INTERVAL=10");
-  }
-  else
-  {
-    loc_cfg.interval = 60 * 1000 * interval;
-  }
-  beacon_timer = new Timer(loc_cfg.interval , Timer::TYPE_PERIODIC);
-  beacon_timer->setEnable(false);
-  beacon_timer->expired.connect(mem_fun(*this, &LocationInfo::sendAprsBeacon));
-  
-  offset_timer = new Timer(5000, Timer::TYPE_ONESHOT);
-  offset_timer->setEnable(true);
-  offset_timer->expired.connect(mem_fun(*this,
-                 &LocationInfo::startNormalSequence));
-} /* LocationInfo::beacontimer */
-
-
-void LocationInfo::startNormalSequence(Async::Timer *t)
-{
-  sendAprsPosition();
-  beacon_timer->setEnable(true);
-} /* LocationInfo::startNormalSequence */
-
-
 void LocationInfo::checkPosition(void)
 {
-  if (stored_lat == 0.0) stored_lat = pos.lat;
-  if (stored_lon == 0.0) stored_lon = pos.lon;
-  float dist = calcDistance(pos.lat, pos.lon, stored_lat, stored_lon);
-  float angle = calcAngle(pos.lat, pos.lon, stored_lat, stored_lon);
+  float dist = calcDistance(position.lat, position.lon, stored_lat, stored_lon);
+  float angle = calcAngle(position.lat, position.lon, stored_lat, stored_lon);
   if (dist > 0.5 || angle >= 12.5)
   {
     sendAprsPosition();
   }
+  if (stored_lat == 0.0) stored_lat = position.lat;
+  if (stored_lon == 0.0) stored_lon = position.lon;
 } /* LocationInfo::checkPosition */
 
 
@@ -819,7 +818,7 @@ void LocationInfo::sendAprsBeacon(Async::Timer *t)
 
 void LocationInfo::sendAprsPosition(void)
 {
-  if (pos.lat >= 0)
+  if (position.lat >= 0)
   {
     loc_cfg.lat_pos.dir = 'N';
   }
@@ -827,7 +826,7 @@ void LocationInfo::sendAprsPosition(void)
   {
     loc_cfg.lat_pos.dir = 'S';
   }
-  if (pos.lon >= 0)
+  if (position.lon >= 0)
   {
     loc_cfg.lon_pos.dir = 'E';
   }
@@ -836,16 +835,16 @@ void LocationInfo::sendAprsPosition(void)
     loc_cfg.lon_pos.dir = 'W';
   }
 
-  loc_cfg.lat_pos.deg = int(abs(pos.lat));
-  loc_cfg.lat_pos.min = int(60*(abs(pos.lat)-int(abs(pos.lat))));
-  loc_cfg.lat_pos.sec = 60*(60*(abs(pos.lat)-int(abs(pos.lat))) - loc_cfg.lat_pos.min);
+  loc_cfg.lat_pos.deg = int(abs(position.lat));
+  loc_cfg.lat_pos.min = int(60*(abs(position.lat)-int(abs(position.lat))));
+  loc_cfg.lat_pos.sec = 60*(60*(abs(position.lat)-int(abs(position.lat))) - loc_cfg.lat_pos.min);
 
-  loc_cfg.lon_pos.deg = abs(int(pos.lon));
-  loc_cfg.lon_pos.min = int(60*(abs(pos.lon)-int(abs(pos.lon))));
-  loc_cfg.lon_pos.sec = 60*(60*(abs(pos.lon)-int(abs(pos.lon))) - loc_cfg.lon_pos.min);
+  loc_cfg.lon_pos.deg = abs(int(position.lon));
+  loc_cfg.lon_pos.min = int(60*(abs(position.lon)-int(abs(position.lon))));
+  loc_cfg.lon_pos.sec = 60*(60*(abs(position.lon)-int(abs(position.lon))) - loc_cfg.lon_pos.min);
 
-  stored_lat = pos.lat;
-  stored_lon = pos.lon;
+  stored_lat = position.lat;
+  stored_lon = position.lon;
 
   ClientList::const_iterator it;
   for (it = clients.begin(); it != clients.end(); it++)
@@ -902,13 +901,16 @@ bool LocationInfo::initNmeaDev(const Config &cfg, const std::string &name)
     int baudrate = atoi(cfg.getValue(name, "NMEA_BAUD").c_str());
     if (baudrate != 2400 && baudrate != 4800 && baudrate != 9600)
     {
-      cout << "+++ Setting default baudrate 4800Bd for " 
+      cout << "+++ Setting default 4800 baud for " << name
            << "/NMEA_BAUD." << endl;
       baudrate = 4800; 
     }
     nmeadev->setParams(baudrate, Serial::PARITY_NONE, 8, 1, Serial::FLOW_NONE);
     nmeadev->charactersReceived.connect(
     	  mem_fun(*this, &LocationInfo::onNmeaReceived));
+
+    cout << "Opening serial nmea device " << value << ", " 
+         << baudrate << " Baud, version: " << NMEA_VERSION << endl;
   }
   return true;
 } /* LocationInfo::initExtPty */
@@ -934,6 +936,7 @@ bool LocationInfo::rmatch(std::string tok, std::string pattern)
 bool LocationInfo::initGpsdClient(const Config &cfg, const std::string &name)
 {
   std::string value;
+  bool debug(false);
   int port = 2947;
   std::string host = "localhost";
   if (cfg.getValue(name, "GPSD_PORT", value))
@@ -946,9 +949,11 @@ bool LocationInfo::initGpsdClient(const Config &cfg, const std::string &name)
     host = value;
   }
 
-  cout << "connecting " << host << ":" << port<< endl;
+  cout << "Connecting Gpsd " << host << ":" << port << " (debug="
+       << (debug ? "TRUE" : "FALSE") << "), version:"
+       << NMEA_VERSION << endl;
 
-  GpsdTcpClient *gpsdcl = new GpsdTcpClient(host, port);
+  GpsdTcpClient *gpsdcl = new GpsdTcpClient(host, port, debug);
   gpsdcl->gpsdDataReceived.connect(mem_fun(*this,
                     &LocationInfo::gpsdDataReceived));
   return true;
@@ -957,7 +962,7 @@ bool LocationInfo::initGpsdClient(const Config &cfg, const std::string &name)
 
 void LocationInfo::gpsdDataReceived(const Position ownpos)
 {
-  pos = ownpos;
+  position = ownpos;
   checkPosition();
 } /* LocationInfo::gpsdReceived */
 

@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2008 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -119,12 +119,10 @@ using namespace SvxLink;
 
 AprsTcpClient::AprsTcpClient(LocationInfo::Cfg &loc_cfg,
                             const std::string &server, int port)
-  : loc_cfg(loc_cfg), server(server), port(port), con(0), reconnect_timer(0), 
-   num_connected(0)
+  : loc_cfg(loc_cfg), server(server), port(port), con(0), beacon_timer(0),
+    reconnect_timer(0), offset_timer(0), num_connected(0)
 {
    StrList str_list;
-
-   destination = "APRS";
 
    el_call = loc_cfg.mycall;  // the EchoLink callsign
    el_prefix = "E" + loc_cfg.prefix + "-"; // the EchoLink prefix ER- od EL-
@@ -134,6 +132,15 @@ AprsTcpClient::AprsTcpClient(LocationInfo::Cfg &loc_cfg,
    con->disconnected.connect(mem_fun(*this, &AprsTcpClient::tcpDisconnected));
    con->dataReceived.connect(mem_fun(*this, &AprsTcpClient::tcpDataReceived));
    con->connect();
+
+   beacon_timer = new Timer(loc_cfg.interval, Timer::TYPE_PERIODIC);
+   beacon_timer->setEnable(false);
+   beacon_timer->expired.connect(mem_fun(*this, &AprsTcpClient::sendAprsBeacon));
+
+   offset_timer = new Timer(10000, Timer::TYPE_ONESHOT);
+   offset_timer->setEnable(false);
+   offset_timer->expired.connect(mem_fun(*this,
+                 &AprsTcpClient::startNormalSequence));
 
    reconnect_timer = new Timer(5000);
    reconnect_timer->setEnable(false);
@@ -146,6 +153,8 @@ AprsTcpClient::~AprsTcpClient(void)
 {
    delete con;
    delete reconnect_timer;
+   delete offset_timer;
+   delete beacon_timer;
 } /* AprsTcpClient::~AprsTcpClient */
 
 
@@ -178,12 +187,12 @@ void AprsTcpClient::updateQsoStatus(int action, const string& call,
     // APRS message
   char aprsmsg[256];
   sprintf(aprsmsg, "%s>%s,%s:;%s%-6.6s*111111z%s%s\r\n",
-          el_call.c_str(), destination.c_str(), loc_cfg.path.c_str(),
+          el_call.c_str(), loc_cfg.destination.c_str(), loc_cfg.path.c_str(),
           el_prefix.c_str(), el_call.c_str(), pos, msg);
   sendMsg(aprsmsg);
 
   // APRS status message, connected calls
-  string status = el_prefix + el_call+">"+destination+","+loc_cfg.path+":>";
+  string status = el_prefix + el_call+">"+loc_cfg.destination+","+loc_cfg.path+":>";
 
   list<string>::const_iterator it;
   for (it = call_list.begin(); it != call_list.end(); ++it)
@@ -270,11 +279,11 @@ void AprsTcpClient::sendABeacon(void)
     // APRS message
   char aprsmsg[150 + loc_cfg.comment.length()];
   sprintf(aprsmsg, "%s>%s,%s:;%s%-6.6s*111111z%s%03d.%03dMHz %s R%02d%c %s\r\n",
-            el_call.c_str(), destination.c_str(), loc_cfg.path.c_str(),
+            el_call.c_str(), loc_cfg.destination.c_str(), loc_cfg.path.c_str(),
             el_prefix.c_str(), el_call.c_str(), pos, loc_cfg.frequency / 1000,
             loc_cfg.frequency % 1000, tone, loc_cfg.range,
             loc_cfg.range_unit, loc_cfg.comment.c_str());
-  //cout << aprsmsg;
+  cout << aprsmsg;
 
   sendMsg(aprsmsg);
 } /* AprsTcpClient::sendBeacon */
@@ -288,7 +297,10 @@ void AprsTcpClient::sendAprsBeacon(Timer *t)
 
 void AprsTcpClient::sendMsg(const char *aprsmsg)
 {
-   //cout << aprsmsg << endl;
+  if (loc_cfg.debug)
+  {
+    std::cout << "APRS: " << aprsmsg;
+  }
 
   if (!con->isConnected())
   {
@@ -351,7 +363,17 @@ void AprsTcpClient::tcpConnected(void)
           " on port " << con->remotePort() << endl;
 
   aprsLogin();                    // login
+  offset_timer->reset();          // reset the offset timer
+  offset_timer->setEnable(true);  // restart the offset timer
 } /* AprsTcpClient::tcpConnected */
+
+
+void AprsTcpClient::startNormalSequence(Timer *t)
+{
+  sendAprsBeacon(t);
+  beacon_timer->setEnable(true);		// start the beaconinterval
+} /* AprsTcpClient::startNormalSequence */
+
 
 
 // ToDo: possible interaction of SvxLink on commands sended via
@@ -369,7 +391,10 @@ void AprsTcpClient::tcpDisconnected(TcpClient<>::TcpConnection *con,
 {
   cout << "*** WARNING: Disconnected from APRS server" << endl;
 
+  beacon_timer->setEnable(false);		// no beacon while disconnected
   reconnect_timer->setEnable(true);		// start the reconnect-timer
+  offset_timer->setEnable(false);
+  offset_timer->reset();
 } /* AprsTcpClient::tcpDisconnected */
 
 
