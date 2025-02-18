@@ -131,70 +131,69 @@ class LocationInfo
 
     struct Coordinate
     {
-       explicit Coordinate(char d = 'N') : deg(0), min(0), sec(0), dir(d) {};
-
-        unsigned int deg, min, sec;
-        char dir;
+      unsigned int  deg {0};
+      unsigned int  min {0};
+      unsigned int  sec {0};
+      char          dir {'N'};
     };
+
+    LocationInfo(void);
+    LocationInfo(const LocationInfo&) = delete;
 
     std::string getCallsign();
 
     struct AprsStatistics
     {
       std::string logic_name;
-      unsigned    rx_on_nr;
-      unsigned    tx_on_nr;
-      float       rx_sec;
-      float       tx_sec;
-      struct timeval last_rx_sec;
-      struct timeval last_tx_sec;
-      bool tx_on;
-      bool squelch_on;
+      unsigned    rx_on_nr        {0};
+      unsigned    tx_on_nr        {0};
+      float       rx_sec          {0.0f};
+      float       tx_sec          {0.0f};
+      struct timeval last_rx_sec  {0, 0};
+      struct timeval last_tx_sec  {0, 0};
+      bool        tx_on           {false};
+      bool        squelch_on      {false};
 
-      AprsStatistics(void) : rx_on_nr(0), tx_on_nr(0), rx_sec(0), tx_sec(0),
-                             last_rx_sec(), last_tx_sec(), tx_on(false),
-                             squelch_on(false) {}
       void reset(void)
       {
         rx_on_nr = 0;
         tx_on_nr = 0;
-        rx_sec = 0;
-        tx_sec = 0;
-        last_tx_sec.tv_sec = 0;
-        last_rx_sec.tv_sec = 0;
-        last_tx_sec.tv_usec = 0;
-        last_rx_sec.tv_usec = 0;
+        rx_sec = 0.0f;
+        tx_sec = 0.0f;
+        last_rx_sec = {0, 0};
+        last_tx_sec = {0, 0};
       }
     };
 
-    typedef std::map<std::string, AprsStatistics> aprs_struct;
+    using aprs_struct = std::map<std::string, AprsStatistics>;
     aprs_struct aprs_stats;
 
     struct Cfg
     {
-      Cfg() : interval(600000), frequency(0), power(0), tone(0), height(10),
-              gain(0), beam_dir(-1), range(0), range_unit('m'), lat_pos('N'),
-              lon_pos('E') {};
-
-      unsigned int interval;
-      unsigned int frequency;
-      unsigned int power;
-      unsigned int tone;
-      unsigned int height;
-      unsigned int gain;
-      int          beam_dir;
-      unsigned int range;
-      char         range_unit;
-
+      unsigned int binterval    {10}; // Minutes
+      unsigned int frequency    {0};
+      unsigned int power        {0};
+      unsigned int tone         {0};
+      unsigned int height       {10};
+      unsigned int gain         {0};
+      int          beam_dir     {-1};
+      unsigned int range        {0};
+      char         range_unit   {'m'};
+      float        distance     {0.5};
+      int          angle        {20};
       Coordinate  lat_pos;
       Coordinate  lon_pos;
 
       std::string mycall;
       std::string prefix;
-      std::string path;
-      std::string comment;
-      std::string destination;
-      bool debug;
+      std::string path          {"WIDE1-1"};
+      std::string comment       {"SvxLink by SM0SVX (www.svxlink.org)"};
+      std::string destination   {"APSVX1"};
+      bool debug                {false};
+      std::string filter;
+      std::string symbol        {"S0"};
+      int         tx_offset_khz {0};
+      bool        narrow        {false};
     };
 
     Coordinate getCoordinate(bool isLatitude)
@@ -203,7 +202,7 @@ class LocationInfo
       return loc_cfg.lon_pos;
     }
 
-    static bool initialize(const Async::Config &cfg, const std::string &cfg_name);
+    static bool initialize(Async::Config& cfg, const std::string& cfg_name);
 
     void updateDirectoryStatus(EchoLink::StationData::Status new_status);
     void igateMessage(const std::string& info);
@@ -217,23 +216,22 @@ class LocationInfo
 
   private:
     static LocationInfo* _instance;
-    LocationInfo() : sequence(0), aprs_stats_timer(0), sinterval(0) {}
-    LocationInfo(const LocationInfo&);
-    ~LocationInfo(void) { delete aprs_stats_timer; };
 
     typedef std::list<AprsClient*> ClientList;
 
-    Cfg         loc_cfg; // weshalb?
-    ClientList  clients;
-    int         sequence;
-    Async::Timer *aprs_stats_timer;
-    unsigned int sinterval;
-    std::string nmeastream;
-    Async::Serial *nmeadev;
-    float stored_lat;
-    float stored_lon;
-    Position position;
-    uint8_t check;
+    Cfg           loc_cfg; // weshalb?
+    ClientList    clients;
+    int           sequence          {0};
+    Async::Timer  aprs_stats_timer  {-1, Async::Timer::TYPE_PERIODIC};
+    unsigned int  sinterval         {10}; // Minutes
+    std::string   slogic;
+    time_t        last_tlm_metadata {0};
+    std::string    nmeastream;
+    Async::Serial  *nmeadev;
+    float          stored_lat;
+    float          stored_lon;
+    Position       position;
+    uint8_t        check;
 
     bool parsePosition(const Async::Config &cfg, const std::string &name);
     bool parseLatitude(Coordinate &pos, const std::string &value);
@@ -245,8 +243,9 @@ class LocationInfo
     bool parseAntennaHeight(Cfg &cfg, const std::string value);
     bool parseClientStr(std::string &host, int &port, const std::string &val);
     bool parseClients(const Async::Config &cfg, const std::string &name);
-    void startStatisticsTimer(int interval);
-    void sendAprsStatistics(Async::Timer *t);
+    void startStatisticsTimer(int sinterval);
+    void sendAprsStatistics(void);
+    
     void initExtPty(std::string ptydevice);
     void mesReceived(std::string message);
     void onNmeaReceived(char *buf, int count);
@@ -260,7 +259,6 @@ class LocationInfo
     bool initGpsdClient(const Async::Config &cfg, const std::string &name);
     void gpsdDataReceived(const Position pos);
     void sendAprsPosition(void);
-    void sendAprsBeacon(Async::Timer *t);
 
 };  /* class LocationInfo */
 

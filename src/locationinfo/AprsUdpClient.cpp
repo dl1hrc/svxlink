@@ -123,7 +123,7 @@ AprsUdpClient::AprsUdpClient(LocationInfo::Cfg &loc_cfg,
   : loc_cfg(loc_cfg), server(server), port(port), dns(0), beacon_timer(0),
     curr_status(StationData::STAT_UNKNOWN), num_connected(0)
 {
-   beacon_timer = new Timer(loc_cfg.interval, Timer::TYPE_PERIODIC);
+   beacon_timer = new Timer(loc_cfg.binterval, Timer::TYPE_PERIODIC);
    beacon_timer->setEnable(false);
    beacon_timer->expired.connect(
      mem_fun(*this, &AprsUdpClient::sendLocationInfo));
