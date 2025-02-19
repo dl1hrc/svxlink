@@ -34,13 +34,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <sstream>
 #include <limits>
 #include <string>
-#include <sys/time.h>
-#include <regex.h>
-#include <iomanip>
+#include <regex>
+
 
 /****************************************************************************
  *
@@ -152,31 +152,29 @@ bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
   LocationInfo::_instance = new LocationInfo();
   auto& loc_cfg = LocationInfo::_instance->loc_cfg;
 
-  std::string callsign;
-  callsign = cfg.getValue(cfg_name, "CALLSIGN");
-
-  if (callsign.find("EL-") != string::npos)
+  cfg.getValue(cfg_name, "CALLSIGN", loc_cfg.mycall);
+  const std::regex el_call_re("(E[LR]-)([0-9A-Z]{4,6})");
+  const std::regex call_re("[0-9A-Z]{4,6}(?:-(?:[1-9]|1[0-5]))?");
+  std::smatch m;
+  if (std::regex_match(loc_cfg.mycall, m, el_call_re))
   {
-    loc_cfg.prefix = "L";
+    loc_cfg.prefix = m[1];
+    loc_cfg.mycall = m[2];
   }
-  else if (callsign.find("ER-") != string::npos)
+  else if (std::regex_match(loc_cfg.mycall, m, call_re))
   {
-    loc_cfg.prefix = "R";
+    loc_cfg.mycall = m[0];
   }
   else
   {
-    cerr << "*** ERROR: variable CALLSIGN must have a prefix (ER- or EL-)" <<
-         " to indicate that is an Echolink station.\n" <<
-         "Example: CALLSIGN=ER-DL1ABC\n";
+    std::cerr << "*** ERROR: variable " << cfg_name << "/CALLSIGN is malformed."
+              << " Either it must have a prefix (ER- or EL-) to indicate that "
+                 "is an Echolink station or it need to be a valid AX.25 "
+                 "callsign.\n"
+              << "Example: CALLSIGN=ER-DL1ABC"
+              << std::endl;
     return false;
   }
-  if (callsign.erase(0,3).length() < 4)
-  {
-    cerr << "*** ERROR: variable CALLSIGN in section " <<
-        cfg_name << " is missing or wrong\nExample: CALLSIGN=ER-DL1ABC\n";
-    return false;
-  }
-  loc_cfg.mycall = callsign;
 
   cfg.getValue(cfg_name, "COMMENT", loc_cfg.comment);
   if (loc_cfg.comment.size() > 36)
@@ -696,7 +694,7 @@ void LocationInfo::sendAprsStatistics(void)
 
     // :ADDRESSEE:
   std::ostringstream addressee;
-  addressee << ":" // << ":E" << loc_cfg.prefix << "-"
+  addressee << ":" // << loc_cfg.prefix
             << std::left << setw(9) << loc_cfg.mycall << ":";
 
   struct timeval now;
@@ -879,9 +877,9 @@ void LocationInfo::handleNmea(std::string message)
   //                $GPGLL,5119.48737,N,01201.09963,E,171526.00,A,A*6B
   //                $GPRMC,174403.00,A,5119.50974,N,01201.10715,E,0.182,,140422,,,A*7C
   //std::string reg = "GPGLL,[0-9]{3,}.[0-9]{2,},[NS],[0-9]{2,}.[0-9]{2,},[EW]";
-  std::string reg = "GPRMC,[0-9]{3,}.[0-9]{1,},[AV],[0-9]{3,}.[0-9]{2,},[NS],[0-9]{3,}.[0-9]{2,},[EW],[0-9]{1,}.[0-9]{1,},";
-
-  if (rmatch(message, reg))
+  const std::regex reg("GPRMC,[0-9]{3,}.[0-9]{1,},[AV],[0-9]{3,}.[0-9]{2,},[NS],[0-9]{3,}.[0-9]{2,},[EW],[0-9]{1,}.[0-9]{1,},");
+  std::smatch m;
+  if (std::regex_search(message, m, reg))
   {
     getNextStr(message); // GPRMC
     getNextStr(message); // Time Stamp
@@ -1018,23 +1016,6 @@ bool LocationInfo::initNmeaDev(const Config &cfg, const std::string &name)
   }
   return true;
 } /* LocationInfo::initExtPty */
-
-
-// needed by regex
-bool LocationInfo::rmatch(std::string tok, std::string pattern)
-{
-  regex_t re;
-  int status = regcomp(&re, pattern.c_str(), REG_EXTENDED);
-  if (status != 0)
-  {
-    return false;
-  }
-
-  bool success = (regexec(&re, tok.c_str(), 0, NULL, 0) == 0);
-  regfree(&re);
-  return success;
-
-} /* rmatch */
 
 
 bool LocationInfo::initGpsdClient(const Config &cfg, const std::string &name)

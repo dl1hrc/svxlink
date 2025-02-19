@@ -48,6 +48,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <AsyncConfig.h>
+#include <AsyncTimer.h>
 #include <EchoLinkStationData.h>
 #include <AsyncSerial.h>
 
@@ -255,7 +256,6 @@ class LocationInfo
     float calcDistance(float lat1, float lon1, float lat2, float lon2);
     float calcAngle(float lat1, float lon1, float lat2, float lon2);
     bool initNmeaDev(const Async::Config &cfg, const std::string &name);
-    bool rmatch(std::string tok, std::string pattern);
     bool initGpsdClient(const Async::Config &cfg, const std::string &name);
     void gpsdDataReceived(const Position pos);
     void sendAprsPosition(void);
