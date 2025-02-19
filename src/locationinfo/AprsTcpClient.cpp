@@ -33,9 +33,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <iostream>
+#include <regex>
 #include <cmath>
 #include <cstring>
-#include <sys/time.h>
+#include <ctime>
 
 
 /****************************************************************************
@@ -133,7 +134,7 @@ AprsTcpClient::AprsTcpClient(LocationInfo::Cfg &loc_cfg,
    con->dataReceived.connect(mem_fun(*this, &AprsTcpClient::tcpDataReceived));
    con->connect();
 
-   beacon_timer = new Timer(loc_cfg.interval, Timer::TYPE_PERIODIC);
+   beacon_timer = new Timer(loc_cfg.binterval * 60 * 1000, Timer::TYPE_PERIODIC);
    beacon_timer->setEnable(false);
    beacon_timer->expired.connect(mem_fun(*this, &AprsTcpClient::sendAprsBeacon));
 
@@ -184,24 +185,27 @@ void AprsTcpClient::updateQsoStatus(int action, const string& call,
   char pos[128];
   posStr(pos);
 
-    // APRS message
+  std::string path(loc_cfg.path);
+  if (!path.empty())
+  {
+    path = std::string(",") + path;
+  }
+
+    // APRS object message
   char aprsmsg[256];
-  sprintf(aprsmsg, "%s>%s,%s:;%s%-6.6s*111111z%s%s\r\n",
-          el_call.c_str(), loc_cfg.destination.c_str(), loc_cfg.path.c_str(),
+  sprintf(aprsmsg, "%s>%s%s:;%s%-6.6s*111111z%s%s",
+          el_call.c_str(), loc_cfg.destination.c_str(), path.c_str(),
           el_prefix.c_str(), el_call.c_str(), pos, msg);
   sendMsg(aprsmsg);
 
-  // APRS status message, connected calls
-  string status = el_prefix + el_call+">"+loc_cfg.destination+","+loc_cfg.path+":>";
-
-  list<string>::const_iterator it;
-  for (it = call_list.begin(); it != call_list.end(); ++it)
+    // APRS status message, connected calls
+  std::string status =
+    el_prefix + el_call + ">" + loc_cfg.destination + path + ":>";
+  for (const auto& call : call_list)
   {
-    status += *it + " ";
+    status += call + " ";
   }
-  status += "\r\n";
-  sendMsg(status.c_str());
-
+  sendMsg(status);
 } /* AprsTcpClient::updateQsoStatus */
 
 
@@ -209,14 +213,14 @@ void AprsTcpClient::updateQsoStatus(int action, const string& call,
 void AprsTcpClient::update3rdState(const string& call, const string& info)
 {
    char aprsmsg[20 + info.length()];
-   sprintf(aprsmsg, "%s>%s\n\r", call.c_str(), info.c_str());
+   sprintf(aprsmsg, "%s>%s", call.c_str(), info.c_str());
    sendMsg(aprsmsg);
 } /* AprsTcpClient::update3rdState */
 
 
 void AprsTcpClient::igateMessage(const string& info)
 {
-  sendMsg(info.c_str());
+  sendMsg(info);
 } /* AprsTcpClient::igateMessage */
 
 
@@ -235,65 +239,119 @@ void AprsTcpClient::igateMessage(const string& info)
  *
  ****************************************************************************/
 
-void AprsTcpClient::posStr(char *pos)
+std::string AprsTcpClient::posStr(const std::string& symbol)
 {
-  char num_connected_overlay;
-  if (num_connected > 0)
+  char symbol_table_id = 'E';
+  char symbol_code = '0';
+
+  if (symbol.size() >= 2)
   {
-    num_connected_overlay = (num_connected < 10) ? '0' + num_connected : '9';
+    symbol_table_id = symbol[0];
+    symbol_code = symbol[1];
   }
-  else
+  else if (num_connected > 0)
   {
-    num_connected_overlay = 'E';
+      // Set overlay
+    symbol_table_id = (num_connected < 10) ? '0' + num_connected : '9';
   }
-  sprintf(pos, "%02d%02d.%02d%c%c%03d%02d.%02d%c0",
+
+  char pos[32];
+  sprintf(pos, "%02d%02d.%02d%c%c%03d%02d.%02d%c%c",
                loc_cfg.lat_pos.deg, loc_cfg.lat_pos.min,
                (loc_cfg.lat_pos.sec * 100) / 60, loc_cfg.lat_pos.dir,
-               num_connected_overlay,
+               symbol_table_id,
                loc_cfg.lon_pos.deg, loc_cfg.lon_pos.min,
-               (loc_cfg.lon_pos.sec * 100) / 60, loc_cfg.lon_pos.dir);
-}
+               (loc_cfg.lon_pos.sec * 100) / 60, loc_cfg.lon_pos.dir,
+               symbol_code);
+  return std::string(pos);
+} /* AprsTcpClient::posStr */
+
+
+std::string AprsTcpClient::timeStr(void)
+{
+  time_t now = time(NULL);
+  struct tm tm, *tm_ptr;
+  tm_ptr = gmtime_r(&now, &tm);
+  std::ostringstream tstr;
+  tstr << std::setw(2) << std::setfill('0') << tm_ptr->tm_mday
+       << std::setw(2) << std::setfill('0') << tm_ptr->tm_hour
+       << std::setw(2) << std::setfill('0') << tm_ptr->tm_min
+       << "z"
+       ;
+  return tstr.str();
+} /* AprsTcpClient::timeStr */
 
 
 void AprsTcpClient::sendAprsBeacon(Timer *t)
 {
-    // Geographic position
-  char pos[128];
-  posStr(pos);
-
     // CTCSS/1750Hz tone
   char tone[5];
-  sprintf(tone, (loc_cfg.tone < 1000) ? "T%03d" : "%04d", loc_cfg.tone);
+  if (loc_cfg.tone < 1000)
+  {
+    sprintf(tone, "%c%03d", (loc_cfg.narrow ? 't' : 'T'), loc_cfg.tone);
+  }
+  else
+  {
+    sprintf(tone, "%04d", loc_cfg.tone);
+  }
 
-    // APRS message
-  char aprsmsg[150 + loc_cfg.comment.length()];
-  sprintf(aprsmsg, "%s>%s,%s:;%s%-6.6s*111111z%s%03d.%03dMHz %s R%02d%c %s\r\n",
-            el_call.c_str(), loc_cfg.destination.c_str(), loc_cfg.path.c_str(),
-            el_prefix.c_str(), el_call.c_str(), pos, loc_cfg.frequency / 1000,
-            loc_cfg.frequency % 1000, tone, loc_cfg.range,
-            loc_cfg.range_unit, loc_cfg.comment.c_str());
-  //cout << aprsmsg;
+  std::string addr = loc_cfg.mycall + ">" + loc_cfg.destination;
+  if (!loc_cfg.path.empty())
+  {
+    addr += std::string(",") + loc_cfg.path;
+  }
+  addr += ":";
 
-  sendMsg(aprsmsg);
+    // Object message for Echolink
+  std::ostringstream objmsg;
+  objmsg << addr
+         << ";" << el_prefix << std::left << std::setw(6) << el_call << "*"
+         << timeStr()
+         << posStr()
+         << std::fixed << std::setw(7) << std::setfill('0')
+            << std::setprecision(3) << (loc_cfg.frequency / 1000.0f) << "MHz"
+         << " " << tone
+         << " " << std::showpos << std::setw(4) << std::internal
+            << (loc_cfg.tx_offset_khz / 10)
+         << " R" << std::setw(2) << loc_cfg.range << loc_cfg.range_unit
+         << " " << loc_cfg.comment;
+  sendMsg(objmsg.str());
 
+    // Position report for main callsign
+  std::ostringstream posmsg;
+  posmsg << addr
+         << "=" << posStr(loc_cfg.symbol)
+         << std::fixed << std::setw(7) << std::setfill('0')
+            << std::setprecision(3) << (loc_cfg.frequency / 1000.0f) << "MHz"
+         << " " << tone
+         << " " << std::showpos << std::setw(4) << std::internal
+            << (loc_cfg.tx_offset_khz / 10)
+         << " R" << std::setw(2) << loc_cfg.range << loc_cfg.range_unit
+         << " " << loc_cfg.comment;
+  sendMsg(posmsg.str());
 } /* AprsTcpClient::sendAprsBeacon*/
 
 
-void AprsTcpClient::sendMsg(const char *aprsmsg)
+void AprsTcpClient::sendMsg(std::string aprsmsg)
 {
-  //std::cout << "### AprsTcpClient::sendMsg: aprsmsg=" << aprsmsg;
+  if (loc_cfg.debug)
+  {
+    std::cout << "APRS: " << aprsmsg << std::endl;
+  }
 
-  if (!con->isConnected())
+  if (!con->isConnected() || aprsmsg.empty())
   {
     return;
   }
 
-  int written = con->write(aprsmsg, strlen(aprsmsg));
+  aprsmsg.append("\r\n");
+
+  int written = con->write(aprsmsg.c_str(), aprsmsg.size());
   if (written < 0)
   {
     cerr << "*** ERROR: TCP write error" << endl;
   }
-  else if ((size_t)written != strlen(aprsmsg))
+  else if (static_cast<size_t>(written) != aprsmsg.size())
   {
     cerr << "*** ERROR: TCP transmit buffer overflow, reconnecting." << endl;
     con->disconnect();
@@ -301,17 +359,17 @@ void AprsTcpClient::sendMsg(const char *aprsmsg)
 } /* AprsTcpClient::sendMsg */
 
 
-
 void AprsTcpClient::aprsLogin(void)
 {
-   char loginmsg[150];
-   const char *format = "user %s pass %d vers SvxLink %s filter m/10\n";
-
-   sprintf(loginmsg, format, el_call.c_str(), getPasswd(el_call),
-           SVXLINK_VERSION);
-   //cout << loginmsg;
-   sendMsg(loginmsg);
-
+  std::ostringstream loginmsg;
+  loginmsg << "user " << el_call
+           << " pass " << getPasswd(el_call)
+           << " vers SvxLink " << SVXLINK_VERSION;
+  if (!loc_cfg.filter.empty())
+  {
+    loginmsg << " filter " << loc_cfg.filter;
+  }
+  sendMsg(loginmsg.str());
 } /* AprsTcpClient::aprsLogin */
 
 
@@ -343,6 +401,8 @@ void AprsTcpClient::tcpConnected(void)
   cout << "Connected to APRS server " << con->remoteHost() <<
           " on port " << con->remotePort() << endl;
 
+  recv_buf.clear();
+
   aprsLogin();                    // login
   offset_timer->reset();          // reset the offset_timer
   offset_timer->setEnable(true);  // restart the offset_timer
@@ -356,13 +416,106 @@ void AprsTcpClient::startNormalSequence(Timer *t)
 } /* AprsTcpClient::startNormalSequence */
 
 
+void AprsTcpClient::decodeAprsPacket(std::string frame)
+{
+  if (frame.at(frame.size() - 1) == '\r')
+  {
+    frame.erase(frame.size() - 1);
+  }
+  if (frame.empty())
+  {
+    return;
+  }
+  if (loc_cfg.debug)
+  {
+    if (frame.at(0) != '#')
+    {
+      std::cout << "APRS: " << frame << std::endl;
+    }
+  }
 
-// ToDo: possible interaction of SvxLink on commands sended via
-//       APRS-net
+  std::smatch m;
+
+  const std::regex msg_addr("([^>]{1,9})>([^:]{1,9})((?:,[^:]{1,9})*):(.*)");
+  if (!std::regex_match(frame, m, msg_addr) && (m.size() != 5))
+  {
+    return;
+  }
+  std::string from{m[1]};
+  std::string to{m[2]};
+  std::string via = m[3];
+  std::string aprs_msg{m[4]};
+  //std::cout << "### from='" << from << "'"
+  //          << " to='" << to << "'"
+  //          << " via='" << via << "'"
+  //          << " aprs_msg='" << aprs_msg << "'"
+  //          << std::endl;
+
+  const std::regex msg_re(":(.{9}):([^|~{]{0,67})(?:\\{(\\d{1,5}))?");
+  if (std::regex_match(aprs_msg, m, msg_re) && (m.size() >= 3))
+  {
+    std::string addressee = m[1];
+    std::string text = m[2];
+    std::string id;
+    if (m.size() == 4)
+    {
+      id = m[3];
+    }
+    auto spacepos = addressee.find(' ');
+    if (spacepos != std::string::npos)
+    {
+      addressee.erase(spacepos);
+    }
+    if (addressee == loc_cfg.mycall)
+    {
+      std::cout << "APRS message";
+      if (!id.empty())
+      {
+        std::cout << "[" << id << "]";
+      }
+      std::cout << " from " << from << ":"
+                << " " << text
+                << std::endl;
+
+      if (!id.empty())
+      {
+        std::ostringstream ack;
+        ack << loc_cfg.mycall << ">" << loc_cfg.destination
+            << "::" << std::left << std::setw(9) << from << ":ack" << id;
+        sendMsg(ack.str());
+      }
+    }
+  }
+
+} /* AprsTcpClient::decodeAprsPacket */
+
+
 int AprsTcpClient::tcpDataReceived(TcpClient<>::TcpConnection *con,
                                    void *buf, int count)
 {
-   return count;                                // do nothing...
+  auto orig_count = count;
+  const char* first = reinterpret_cast<const char*>(buf);
+  while (count > 0)
+  {
+    const char* nl = reinterpret_cast<const char*>(memchr(first, '\n', count));
+    if (nl != nullptr)
+    {
+      recv_buf.append(first, nl);
+      if (!recv_buf.empty())
+      {
+        decodeAprsPacket(recv_buf);
+        recv_buf.clear();
+      }
+      count -= nl - first + 1;
+      first = nl+1;
+    }
+    else
+    {
+      recv_buf.append(first, count);
+    }
+  }
+
+  return orig_count;
 } /* AprsTcpClient::tcpDataReceived */
 
 
@@ -376,6 +529,7 @@ void AprsTcpClient::tcpDisconnected(TcpClient<>::TcpConnection *con,
   reconnect_timer->setEnable(true);		// start the reconnect-timer
   offset_timer->setEnable(false);
   offset_timer->reset();
+  recv_buf.clear();
 } /* AprsTcpClient::tcpDisconnected */
 
 
