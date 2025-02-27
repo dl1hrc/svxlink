@@ -132,7 +132,7 @@ AprsTcpClient::AprsTcpClient(LocationInfo::Cfg &loc_cfg,
    con->dataReceived.connect(mem_fun(*this, &AprsTcpClient::tcpDataReceived));
    con->connect();
 
-   beacon_timer = new Timer(loc_cfg.binterval, Timer::TYPE_PERIODIC);
+   beacon_timer = new Timer(loc_cfg.binterval * 60 * 1000, Timer::TYPE_PERIODIC);
    beacon_timer->setEnable(false);
    beacon_timer->expired.connect(mem_fun(*this, &AprsTcpClient::sendAprsBeacon));
 
