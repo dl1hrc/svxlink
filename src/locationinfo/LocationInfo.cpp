@@ -149,7 +149,7 @@ bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
 
   cfg.getValue(cfg_name, "CALLSIGN", loc_cfg.mycall);
   std::string logincall;
-  const std::regex el_call_re("(E[LR]-)([0-9A-Z]{4,6})");
+  const std::regex el_call_re("E([LR])-([0-9A-Z]{4,6})");
   const std::regex call_re("([0-9A-Z]{4,6})(-(?:[1-9]|1[0-5]))?");
   std::smatch m;
   if (std::regex_match(loc_cfg.mycall, m, el_call_re))
@@ -447,10 +447,10 @@ bool LocationInfo::parseLongitude(Coordinate &pos, const std::string& value)
 bool LocationInfo::parseStationHW(const Async::Config &cfg,
                                   const std::string& name)
 {
-  float frequency = 0;
   bool success = true;
 
-  if (!cfg.getValue(name, "FREQUENCY", frequency))
+  double frequency = 0.0;
+  if (!cfg.getValue(name, "FREQUENCY", 0.001, 24299.999, frequency))
   {
     print_error(name, "FREQUENCY", cfg.getValue(name, "FREQUENCY"),
                 "FREQUENCY=438.875");
@@ -458,7 +458,7 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg,
   }
   else
   {
-    loc_cfg.frequency = lrintf(1000.0 * frequency);
+    loc_cfg.frequency = lrint(1000.0 * frequency);
   }
 
   if (!cfg.getValue(name, "TX_OFFSET", -9990, 9990, loc_cfg.tx_offset_khz, true))
@@ -499,7 +499,7 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg,
     success = false;
   }
 
-  if (!cfg.getValue(name, "TONE", loc_cfg.tone, true))
+  if (!cfg.getValue(name, "TONE", 0U, 9999U, loc_cfg.tone, true))
   {
     print_error(name, "TONE", cfg.getValue(name, "TONE"), "TONE=0");
     success = false;
@@ -679,11 +679,16 @@ void LocationInfo::sendAprsStatistics(void)
 
     // FROM>APSVXn,VIA1,VIA2,VIAn:
   std::ostringstream addr;
-  addr << loc_cfg.mycall << ">" << loc_cfg.destination << ":";
+  addr << loc_cfg.mycall << ">" << loc_cfg.destination;
+  if (!loc_cfg.path.empty())
+  {
+    addr << "," << loc_cfg.path;
+  }
+  addr << ":";
 
     // :ADDRESSEE:
   std::ostringstream addressee;
-  addressee << ":" // << loc_cfg.prefix
+  addressee << ":" // << "E" << loc_cfg.prefix << "-"
             << std::left << std::setw(9) << loc_cfg.mycall << ":";
 
   const auto now = Clock::now();
