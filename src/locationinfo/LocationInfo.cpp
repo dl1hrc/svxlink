@@ -34,7 +34,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <cmath>
 #include <cstdlib>
-#include <ctime>
 #include <iostream>
 #include <sstream>
 #include <limits>
@@ -70,7 +69,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-using namespace std;
 using namespace Async;
 using namespace EchoLink;
 
@@ -94,8 +92,8 @@ namespace
  *
  ****************************************************************************/
 
-void print_error(const string &name, const string &variable,
-                 const string &value, const string &example = "");
+void print_error(const std::string& name, const std::string& variable,
+                 const std::string& value, const std::string& example = "");
 
 
 /****************************************************************************
@@ -135,23 +133,36 @@ LocationInfo* LocationInfo::_instance = nullptr;
 LocationInfo::LocationInfo(void)
 {
   aprs_stats_timer.expired.connect(sigc::hide(
-      mem_fun(*this, &LocationInfo::sendAprsStatistics)));
+      sigc::mem_fun(*this, &LocationInfo::sendAprsStatistics)));
 } /* LocationInfo::LocationInfo */
+
+
+LocationInfo::~LocationInfo(void)
+{
+  for (const auto client : clients)
+  {
+    delete client;
+  }
+  clients.clear();
+
+  delete aprspty;
+  aprspty = nullptr;
+} /* LocationInfo::~LocationInfo */
 
 
 bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
 {
     // Check if already initialized
-  if (LocationInfo::_instance->has_instance()) return false;
+  if (has_instance()) return false;
 
   bool init_ok = true;
 
-  LocationInfo::_instance = new LocationInfo;
-  auto& loc_cfg = LocationInfo::_instance->loc_cfg;
+  _instance = new LocationInfo;
+  auto& loc_cfg = _instance->loc_cfg;
 
   cfg.getValue(cfg_name, "CALLSIGN", loc_cfg.mycall);
   std::string logincall;
-  const std::regex el_call_re("(E[LR]-)([0-9A-Z]{4,6})");
+  const std::regex el_call_re("E([LR])-([0-9A-Z]{4,6})");
   const std::regex call_re("([0-9A-Z]{4,6})(-(?:[1-9]|1[0-5]))?");
   std::smatch m;
   if (std::regex_match(loc_cfg.mycall, m, el_call_re))
@@ -188,9 +199,6 @@ bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
   }
   loc_cfg.logincall = m[1];
   loc_cfg.loginssid = m[2];
-  //std::cout << "### logincall=" << loc_cfg.logincall
-  //          << "  loginssid=" << loc_cfg.loginssid
-  //          << std::endl;
 
   cfg.getValue(cfg_name, "COMMENT", loc_cfg.comment);
   if (loc_cfg.comment.size() > 36)
@@ -214,16 +222,16 @@ bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
   dest_ss << "APSVX" << dest_num;
   loc_cfg.destination = dest_ss.str();
 
-  init_ok &= LocationInfo::_instance->parsePosition(cfg, cfg_name);
-  init_ok &= LocationInfo::_instance->parseStationHW(cfg, cfg_name);
-  init_ok &= LocationInfo::_instance->parsePath(cfg, cfg_name);
-  init_ok &= LocationInfo::_instance->parseClients(cfg, cfg_name);
+  init_ok &= _instance->parsePosition(cfg, cfg_name);
+  init_ok &= _instance->parseStationHW(cfg, cfg_name);
+  init_ok &= _instance->parsePath(cfg, cfg_name);
+  init_ok &= _instance->parseClients(cfg, cfg_name);
 
-  auto& siv = LocationInfo::_instance->sinterval;
+  auto& siv = _instance->sinterval;
   cfg.getValue(cfg_name, "STATISTICS_INTERVAL", 5U, 60U, siv);
-  LocationInfo::_instance->startStatisticsTimer(siv * 60 * 1000);
+  _instance->startStatisticsTimer(siv * 60 * 1000);
 
-  cfg.getValue(cfg_name, "STATISTICS_LOGIC", LocationInfo::_instance->slogic);
+  cfg.getValue(cfg_name, "STATISTICS_LOGIC", _instance->slogic);
 
   cfg.getValue(cfg_name, "FILTER", loc_cfg.filter);
 
@@ -236,104 +244,102 @@ bool LocationInfo::initialize(Async::Config& cfg, const std::string& cfg_name)
     return false;
   }
 
-  LocationInfo::_instance->initExtPty(cfg.getValue(cfg_name, "PTY_PATH"));
+  _instance->initExtPty(cfg.getValue(cfg_name, "PTY_PATH"));
 
-  if( !init_ok )
+  if(!init_ok)
   {
-    delete LocationInfo::_instance;
-    LocationInfo::_instance = NULL;
+    deleteInstance();
   }
 
   return init_ok;
-
 } /* LocationInfo::initialize */
 
 
 void LocationInfo::updateDirectoryStatus(StationData::Status status)
 {
-  ClientList::const_iterator it;
-  for (it = clients.begin(); it != clients.end(); it++)
+  for (const auto client : clients)
   {
-    (*it)->updateDirectoryStatus(status);
+    client->updateDirectoryStatus(status);
   }
 } /* LocationInfo::updateDirectoryStatus */
 
 
-void LocationInfo::updateQsoStatus(int action, const string& call,
-                                   const string& info, list<string>& call_list)
+void LocationInfo::updateQsoStatus(int action, const std::string& call,
+                                   const std::string& info,
+                                   std::list<std::string>& call_list)
 {
-  ClientList::const_iterator it;
-  for (it = clients.begin(); it != clients.end(); it++)
+  for (const auto client : clients)
   {
-    (*it)->updateQsoStatus(action, call, info, call_list);
+    client->updateQsoStatus(action, call, info, call_list);
   }
 } /* LocationInfo::updateQsoStatus */
 
 
-void LocationInfo::update3rdState(const string& call, const string& info)
+void LocationInfo::update3rdState(const std::string& call,
+                                  const std::string& info)
 {
-  ClientList::const_iterator it;
-  for (it = clients.begin(); it != clients.end(); it++)
+  for (const auto client : clients)
   {
-    (*it)->update3rdState(call, info);
+    client->update3rdState(call, info);
   }
 } /* LocationInfo::update3rdState */
 
 
 void LocationInfo::igateMessage(const std::string& info)
 {
-  ClientList::const_iterator it;
-  for (it = clients.begin(); it != clients.end(); it++)
+  for (const auto client : clients)
   {
-    (*it)->igateMessage(info);
+    client->igateMessage(info);
   }
 } /* LocationInfo::igateMessage */
 
 
-string LocationInfo::getCallsign(void)
-{
-  return loc_cfg.mycall;
-} /* LocationInfo::getCallsign */
-
-
 bool LocationInfo::getTransmitting(const std::string &name)
 {
-   return aprs_stats[name].tx_on;
+   return aprsStats(name).is_transmitting;
 } /* LocationInfo::getTransmitting */
 
 
-void LocationInfo::setTransmitting(const std::string &name, struct timeval tv,
-                                   bool is_transmitting)
+void LocationInfo::setTransmitting(const std::string& name,
+                                   bool is_transmitting,
+                                   LocationInfo::Timepoint tp)
 {
-  AprsStatistics& stats = aprs_stats[name];
-  stats.tx_on = is_transmitting;
+  AprsStatistics& stats = aprsStats(name);
+  if (is_transmitting == stats.is_transmitting)
+  {
+    return;
+  }
+  stats.is_transmitting = is_transmitting;
   if (is_transmitting)
   {
     stats.tx_on_nr++;
-    stats.last_tx_sec = tv;
+    stats.last_tx_tp = tp;
   }
   else
   {
-    stats.tx_sec += tv.tv_sec - stats.last_tx_sec.tv_sec +
-                    (tv.tv_usec - stats.last_tx_sec.tv_usec) / 1000000.0f;
+    stats.tx_sec += tp - stats.last_tx_tp;
   }
 } /* LocationInfo::setTransmitting */
 
 
-void LocationInfo::setReceiving(const std::string &name, struct timeval tv,
-                                bool is_receiving)
+void LocationInfo::setReceiving(const std::string& name,
+                                bool is_receiving,
+                                const LocationInfo::Timepoint& tp)
 {
-  AprsStatistics& stats = aprs_stats[name];
-  stats.squelch_on = is_receiving;
+  AprsStatistics& stats = aprsStats(name);
+  if (is_receiving == stats.is_receiving)
+  {
+    return;
+  }
+  stats.is_receiving = is_receiving;
   if (is_receiving)
   {
     stats.rx_on_nr += 1;
-    stats.last_rx_sec = tv;
+    stats.last_rx_tp = tp;
   }
   else
   {
-    stats.rx_sec += tv.tv_sec - stats.last_rx_sec.tv_sec +
-                    (tv.tv_usec - stats.last_rx_sec.tv_usec) / 1000000.0f;
+    stats.rx_sec += tp - stats.last_rx_tp;
   }
 } /* LocationInfo::setReceiving */
 
@@ -352,11 +358,11 @@ void LocationInfo::setReceiving(const std::string &name, struct timeval tv,
  *
  ****************************************************************************/
 
-bool LocationInfo::parsePosition(const Config &cfg, const string &name)
+bool LocationInfo::parsePosition(const Config &cfg, const std::string& name)
 {
   bool success = true;
 
-  string pos_str(cfg.getValue(name,"LAT_POSITION"));
+  std::string pos_str(cfg.getValue(name, "LAT_POSITION"));
   if (!parseLatitude(loc_cfg.lat_pos, pos_str)) // weshalb wird loc_cfg benötigt (und nicht cfg??)
   {
     print_error(name, "LAT_POSITION", pos_str, "LAT_POSITION=51.20.10N");
@@ -375,13 +381,13 @@ bool LocationInfo::parsePosition(const Config &cfg, const string &name)
 } /* LocationInfo::parsePosition */
 
 
-bool LocationInfo::parseLatitude(Coordinate &pos, const string &value)
+bool LocationInfo::parseLatitude(Coordinate &pos, const std::string& value)
 {
   unsigned int deg, min, sec;
   char dir, sep[2];
-  stringstream ss(value);
+  std::stringstream ss(value);
 
-  ss >> deg >> sep[0] >> min >> sep[1] >> sec >> dir >> ws;
+  ss >> deg >> sep[0] >> min >> sep[1] >> sec >> dir >> std::ws;
 
   if (ss.fail() || !ss.eof())
   {
@@ -411,13 +417,13 @@ bool LocationInfo::parseLatitude(Coordinate &pos, const string &value)
 } /* LocationInfo::parseLatitude */
 
 
-bool LocationInfo::parseLongitude(Coordinate &pos, const string &value)
+bool LocationInfo::parseLongitude(Coordinate &pos, const std::string& value)
 {
   unsigned int deg, min, sec;
   char dir, sep[2];
-  stringstream ss(value);
+  std::stringstream ss(value);
 
-  ss >> deg >> sep[0] >> min >> sep[1] >> sec >> dir >> ws;
+  ss >> deg >> sep[0] >> min >> sep[1] >> sec >> dir >> std::ws;
 
   if (ss.fail() || !ss.eof())
   {
@@ -447,12 +453,13 @@ bool LocationInfo::parseLongitude(Coordinate &pos, const string &value)
 } /* LocationInfo::parseLongitude */
 
 
-bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
+bool LocationInfo::parseStationHW(const Async::Config &cfg,
+                                  const std::string& name)
 {
-  float frequency = 0;
   bool success = true;
 
-  if (!cfg.getValue(name, "FREQUENCY", frequency))
+  double frequency = 0.0;
+  if (!cfg.getValue(name, "FREQUENCY", 0.001, 24299.999, frequency))
   {
     print_error(name, "FREQUENCY", cfg.getValue(name, "FREQUENCY"),
                 "FREQUENCY=438.875");
@@ -460,7 +467,7 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
   }
   else
   {
-    loc_cfg.frequency = lrintf(1000.0 * frequency);
+    loc_cfg.frequency = lrint(1000.0 * frequency);
   }
 
   if (!cfg.getValue(name, "TX_OFFSET", -9990, 9990, loc_cfg.tx_offset_khz, true))
@@ -472,8 +479,8 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
 
   cfg.getValue(name, "NARROW", loc_cfg.narrow);
 
-  if (!cfg.getValue(name, "TX_POWER", 1U, numeric_limits<unsigned int>::max(),
-		    loc_cfg.power))
+  if (!cfg.getValue(name, "TX_POWER", 1U,
+                    std::numeric_limits<unsigned int>::max(), loc_cfg.power))
   {
     print_error(name, "TX_POWER", cfg.getValue(name, "TX_POWER"),
                 "TX_POWER=8");
@@ -501,14 +508,14 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
     success = false;
   }
 
-  if (!cfg.getValue(name, "TONE", loc_cfg.tone, true))
+  if (!cfg.getValue(name, "TONE", 0U, 9999U, loc_cfg.tone, true))
   {
     print_error(name, "TONE", cfg.getValue(name, "TONE"), "TONE=0");
     success = false;
   }
 
   int binterval = 10;
-  int max = numeric_limits<int>::max();
+  int max = std::numeric_limits<int>::max();
   if (!cfg.getValue(name, "BEACON_INTERVAL", 10, max, binterval, true))
   {
     print_error(name, "BEACON_INTERVAL", cfg.getValue(name, "BEACON_INTERVAL"),
@@ -527,7 +534,7 @@ bool LocationInfo::parseStationHW(const Async::Config &cfg, const string &name)
 } /* LocationInfo::parseStationHW */
 
 
-bool LocationInfo::parsePath(const Async::Config &cfg, const string &name)
+bool LocationInfo::parsePath(const Async::Config &cfg, const std::string& name)
 {
     // FIXME: Verify the path syntax!
     //        http://www.aprs.org/newN/new-eu-paradigm.txt
@@ -563,8 +570,8 @@ bool LocationInfo::parseAntennaHeight(Cfg &cfg, const std::string value)
     return true;
   }
 
-  stringstream ss(value);
-  ss >> height >> unit >> ws;
+  std::stringstream ss(value);
+  ss >> height >> unit >> std::ws;
   if (ss.fail() || !ss.eof())
   {
     return false;
@@ -583,11 +590,12 @@ bool LocationInfo::parseAntennaHeight(Cfg &cfg, const std::string value)
 } /* LocationInfo::parseAntennaHeight */
 
 
-bool LocationInfo::parseClients(const Async::Config &cfg, const string &name)
+bool LocationInfo::parseClients(const Async::Config &cfg,
+                                const std::string& name)
 {
-  string aprs_server_list(cfg.getValue(name, "APRS_SERVER_LIST"));
-  stringstream clientStream(aprs_server_list);
-  string client, host;
+  std::string aprs_server_list(cfg.getValue(name, "APRS_SERVER_LIST"));
+  std::stringstream clientStream(aprs_server_list);
+  std::string client, host;
   int port;
   bool success = true;
 
@@ -607,7 +615,7 @@ bool LocationInfo::parseClients(const Async::Config &cfg, const string &name)
   }
 
   clientStream.clear();
-  string status_server_list(cfg.getValue(name, "STATUS_SERVER_LIST"));
+  std::string status_server_list(cfg.getValue(name, "STATUS_SERVER_LIST"));
   clientStream.str(status_server_list);
   while (clientStream >> client)
   {
@@ -629,7 +637,8 @@ bool LocationInfo::parseClients(const Async::Config &cfg, const string &name)
 } /* LocationInfo::parseClients */
 
 
-bool LocationInfo::parseClientStr(string &host, int &port, const string &val)
+bool LocationInfo::parseClientStr(std::string& host, int &port,
+                                  const std::string& val)
 {
   if (val.empty())
   {
@@ -637,16 +646,16 @@ bool LocationInfo::parseClientStr(string &host, int &port, const string &val)
   }
 
   int tmpPort;
-  string::size_type hostEnd;
+  std::string::size_type hostEnd;
 
   hostEnd = val.find_last_of(':');
-  if (hostEnd == string::npos)
+  if (hostEnd == std::string::npos)
   {
     return false;
   }
 
-  string portStr(val.substr(hostEnd+1, string::npos));
-  stringstream ssval(portStr);
+  std::string portStr(val.substr(hostEnd+1, std::string::npos));
+  std::stringstream ssval(portStr);
   ssval >> tmpPort;
   if (!ssval)
   {
@@ -679,20 +688,23 @@ void LocationInfo::sendAprsStatistics(void)
 
     // FROM>APSVXn,VIA1,VIA2,VIAn:
   std::ostringstream addr;
-  addr << loc_cfg.mycall << ">" << loc_cfg.destination << ":";
+  addr << loc_cfg.mycall << ">" << loc_cfg.destination;
+  if (!loc_cfg.path.empty())
+  {
+    addr << "," << loc_cfg.path;
+  }
+  addr << ":";
 
     // :ADDRESSEE:
   std::ostringstream addressee;
-  addressee << ":" // << loc_cfg.prefix
-            << std::left << setw(9) << loc_cfg.mycall << ":";
+  addressee << ":" // << "E" << loc_cfg.prefix << "-"
+            << std::left << std::setw(9) << loc_cfg.mycall << ":";
 
-  struct timeval now;
-  gettimeofday(&now, NULL);
-
-  bool send_metadata = ((now.tv_sec - last_tlm_metadata) > 1800);
+  const auto now = Clock::now();
+  bool send_metadata = (now - last_tlm_metadata > std::chrono::minutes(59));
   if (send_metadata)
   {
-    last_tlm_metadata = now.tv_sec;
+    last_tlm_metadata = now;
 
       // PARM.A1,A2,A3,A4,A5,B1,B2,B3,B4,B5,B6,B7,B8
     std::ostringstream parm;
@@ -733,16 +745,14 @@ void LocationInfo::sendAprsStatistics(void)
       continue;
     }
 
-    if (stats.squelch_on)
-    {
-      setReceiving(logic_name, now, false);
-    }
-    if (stats.tx_on)
-    {
-      setTransmitting(logic_name, now, false);
-    }
+      // Remember squelch and tx state then force inactive to finish statistics
+      // interval
+    bool is_receiving = stats.is_receiving;
+    bool is_transmitting = stats.is_transmitting;
+    setReceiving(logic_name, false, now);
+    setTransmitting(logic_name, false, now);
 
-    const float erlang_b = 0.00392f;
+    const double erlang_b = 1.0 / 255.0;
     if (send_metadata)
     {
         // BITS.XXXXXXXX,Project Title
@@ -768,63 +778,62 @@ void LocationInfo::sendAprsStatistics(void)
     }
 
       // T#nnn,nnn,nnn,nnn,nnn,nnn,nnnnnnnn
-    auto rx_erlang = stats.rx_sec / (60.0f * sinterval);
-    auto tx_erlang = stats.tx_sec / (60.0f * sinterval);
+    auto rx_erlang = stats.rx_sec.count() / (60.0 * sinterval);
+    auto tx_erlang = stats.tx_sec.count() / (60.0 * sinterval);
     std::ostringstream tlm;
     tlm << addr.str()
-        << "T#" << std::setw(3) << std::setfill('0') << sequence
-        << "," << std::setw(3) << std::setfill('0') << int(rx_erlang / erlang_b)
-        << "," << std::setw(3) << std::setfill('0') << int(tx_erlang / erlang_b)
-        << "," << std::setw(3) << std::setfill('0')
+        << "T#" << std::setw(3) << std::setfill('0') << sequence  // Sequence
+        << "," << std::setw(3) << std::setfill('0')               // A1
+               << std::lrint(rx_erlang / erlang_b)
+        << "," << std::setw(3) << std::setfill('0')               // A2
+               << std::lrint(tx_erlang / erlang_b)
+        << "," << std::setw(3) << std::setfill('0')               // A3
           << std::min(stats.rx_on_nr, 255U)
-        << "," << std::setw(3) << std::setfill('0')
+        << "," << std::setw(3) << std::setfill('0')               // A4
           << std::min(stats.tx_on_nr, 255U)
-        << ",000"
-        << "," << (stats.squelch_on ? 1 : 0)
-        << (stats.tx_on ? 1 : 0)
-        << "000000"
+        << ",000"                                                 // A5
+        << ","
+        << (is_receiving ? 1 : 0)                                 // B1
+        << (is_transmitting ? 1 : 0)                              // B2
+        << "000000"                                               // B3-B8
         ;
     igateMessage(tlm.str());
 
-      // reset statistics if needed
+      // Reset statistics
     stats.reset();
 
-    if (stats.squelch_on)
-    {
-      setReceiving(logic_name, now, true);
-    }
+      // Restore squelch and tx state
+    setReceiving(logic_name, is_receiving, now);
+    setTransmitting(logic_name, is_transmitting, now);
 
-    if (stats.tx_on)
-    {
-      setTransmitting(logic_name, now, true);
-    }
-
-    if (++sequence > 999)
-    {
-      sequence = 0;
-    }
+      // Advance sequence number
+    sequence = (sequence < 999) ? sequence+1 : 0;
   }
 } /* LocationInfo::sendAprsStatistics */
 
 
 void LocationInfo::initExtPty(std::string ptydevice)
 {
-  AprsPty *aprspty = new AprsPty();
-  if (!aprspty->initialize(ptydevice))
+  aprspty = new Async::Pty(ptydevice);
+  aprspty->setLineBuffered(true);
+  if (!aprspty || !aprspty->open())
   {
-     cout << "*** ERROR: initializing aprs pty device " << ptydevice << endl;
+    std::cerr << "*** ERROR: Failed to open the aprs pty device "
+              << ptydevice << std::endl;
   }
   else
   {
-     aprspty->messageReceived.connect(mem_fun(*this,
-                    &LocationInfo::mesReceived));
+     aprspty->dataReceived.connect(
+         sigc::mem_fun(*this, &LocationInfo::mesReceived));
   }
 } /* LocationInfo::initExtPty */
 
 
-void LocationInfo::mesReceived(std::string message)
+void LocationInfo::mesReceived(const void* buf, size_t len)
 {
-  string loc_call = LocationInfo::getCallsign();
+  const char* ptr = static_cast<const char*>(buf);
+  std::string message(ptr, ptr+len);
+  std::string loc_call = loc_cfg.mycall;
   size_t found = message.find("XXXXXX");
 
   if (found != std::string::npos)
@@ -836,6 +845,24 @@ void LocationInfo::mesReceived(std::string message)
 
   igateMessage(message);
 } /* LocationInfo::mesReceived */
+
+
+// This function was added to get around an issue that might cause problems on
+// an older gcc (<7.1) on ARM platforms. The problem will cause this warning to
+// be issued on the older compilers:
+// "note: parameter passing for argument of type ‘...’ will change in GCC 7.1"
+LocationInfo::AprsStatistics&
+LocationInfo::aprsStats(const std::string& logic_name)
+{
+  auto it = aprs_stats.find(logic_name);
+  if (it == aprs_stats.end())
+  {
+    auto emplace_res = aprs_stats.emplace(logic_name, AprsStatistics());
+    assert(emplace_res.second);
+    it = emplace_res.first;
+  }
+  return it->second;
+} /* LocationInfo::aprsStats */
 
 
 /****************************************************************************
@@ -850,17 +877,17 @@ void LocationInfo::mesReceived(std::string message)
 namespace
 {
 
-void print_error(const string &name, const string &variable,
-                 const string &value, const string &example)
+void print_error(const std::string& name, const std::string& variable,
+                 const std::string& value, const std::string& example)
 {
-  cerr << "*** ERROR: Config variable [" << name << "]/" << variable << "="
-       << value << " wrong or not set.";
+  std::cerr << "*** ERROR: Config variable [" << name << "]/" << variable << "="
+            << value << " wrong or not set.";
 
   if (!example.empty())
   {
-    cerr << "\n*** Example: " <<  example;
+    std::cerr << "\n*** Example: " <<  example;
   }
-  cerr << endl;
+  std::cerr << std::endl;
 } /* print_error */
 
 } // End of anonymous namespace
