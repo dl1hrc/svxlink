@@ -271,7 +271,7 @@ void AprsTcpClient::igateMessage(const string& info)
 std::string AprsTcpClient::addrStr(void)
 {
     // MYCALL>APSVXn,path:
-  std::string addr = loc_cfg.mycall + ">" + loc_cfg.destination;
+  std::string addr = loc_cfg.sourcecall + ">" + loc_cfg.destination;
   if (!loc_cfg.path.empty())
   {
     addr += std::string(",") + loc_cfg.path;
@@ -449,7 +449,9 @@ void AprsTcpClient::sendAprsBeacon(Timer *t)
     // Position report for main callsign
   std::ostringstream posmsg;
   posmsg << addrStr()
-         << "="
+         //<< "="
+         << ";" << addresseeStr(loc_cfg.mycall) << "*"
+         << "111111z"
          << posStr(loc_cfg.symbol)
          << phgStr()
          << "/" << frequencyStr()
@@ -609,7 +611,7 @@ void AprsTcpClient::decodeAprsPacket(std::string frame)
     {
       addressee.erase(spacepos);
     }
-    if (addressee == loc_cfg.mycall)
+    if (addressee == loc_cfg.sourcecall)
     {
       std::cout << "APRS message";
       if (!id.empty())
@@ -623,7 +625,7 @@ void AprsTcpClient::decodeAprsPacket(std::string frame)
       if (!id.empty())
       {
         std::ostringstream ack;
-        ack << loc_cfg.mycall << ">" << loc_cfg.destination
+        ack << loc_cfg.sourcecall << ">" << loc_cfg.destination
             << "::" << addresseeStr(from) << ":ack" << id;
         sendMsg(ack.str());
       }
