@@ -1309,6 +1309,14 @@ void Reflector::udpDatagramReceived(const IpAddress& addr, uint16_t port,
            << std::endl;
       return;
     }
+
+    if (addr != client->remoteHost())
+    {
+      cerr << "*** WARNING[" << client->callsign()
+           << "]: Incoming UDP packet has the wrong source ip, "
+           << addr << " instead of " << client->remoteHost() << endl;
+      return;
+    }
   }
 
   //auto client = ReflectorClient::lookup(std::make_pair(addr, port));
@@ -1323,16 +1331,9 @@ void Reflector::udpDatagramReceived(const IpAddress& addr, uint16_t port,
   //  }
   //}
 
-  if (addr != client->remoteHost())
-  {
-    cerr << "*** WARNING[" << client->callsign()
-         << "]: Incoming UDP packet has the wrong source ip, "
-         << addr << " instead of " << client->remoteHost() << endl;
-    return;
-  }
   if (client->remoteUdpPort() == 0)
   {
-    client->setRemoteUdpPort(port);
+    client->setRemoteUdpSource(std::make_pair(addr, port));
     client->sendUdpMsg(MsgUdpHeartbeat());
   }
   if (port != client->remoteUdpPort())
