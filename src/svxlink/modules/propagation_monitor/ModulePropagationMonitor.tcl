@@ -12,12 +12,8 @@
 #
 namespace eval PropagationMonitor {
 
-#
-# Check if this module is loaded in the current logic core
-#
-if {![info exists CFG_ID]} {
-  return;
-}
+# Enable lookup of commands in the logic core namespace
+namespace path ::${::logic_name}
 
 
 #
@@ -90,6 +86,11 @@ proc dtmfCmdReceived {cmd} {
 #
 proc dtmfCmdReceivedWhenIdle {cmd} {
   #printInfo "DTMF command received while idle: $cmd";
+  if {$cmd == "0"} {
+    processEvent "play_help"
+  } else {
+    processEvent "unknown_command $cmd"
+  }
 }
 
 
@@ -280,8 +281,7 @@ if {![file exists $CFG_SPOOL_DIR/vhfdx/archive]} {
   file mkdir $CFG_SPOOL_DIR/vhfdx/archive
 }
 
-append func $module_name "::check_for_alerts";
-Logic::addMinuteTickSubscriber $func;
+Logic::addMinuteTickSubscriber check_for_alerts
 
 
 
