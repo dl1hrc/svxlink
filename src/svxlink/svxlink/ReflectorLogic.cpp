@@ -454,12 +454,13 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     }
   }
 
-  string event_handler_str;
-  if (!cfg().getValue(name(), "EVENT_HANDLER", event_handler_str) ||
-      event_handler_str.empty())
+  std::string event_handler_str(SVX_SHARE_INSTALL_DIR);
+  event_handler_str += "/events.tcl";
+  cfg().getValue(name(), "EVENT_HANDLER", event_handler_str);
+  if (event_handler_str.empty())
   {
     std::cerr << "*** ERROR: Config variable " << name()
-              << "/EVENT_HANDLER not set or empty" << std::endl;
+              << "/EVENT_HANDLER empty" << std::endl;
     return false;
   }
 
@@ -576,16 +577,20 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     m_event_handler->playDtmf.connect(
           sigc::mem_fun(*this, &ReflectorLogic::handlePlayDtmf));
   }
+  m_event_handler->getConfigValue.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::getConfigValue));
   m_event_handler->setConfigValue.connect(
       sigc::mem_fun(cfg(), &Async::Config::setValue<std::string>));
-  m_event_handler->setVariable("logic_name", name().c_str());
+  m_event_handler->setVariable("logic_name", name());
+  m_event_handler->setVariable("logic_type", type());
 
-  m_event_handler->processEvent("namespace eval Logic {}");
+  m_event_handler->processEvent(
+      std::string("namespace eval ") + name() + "::Logic {}");
   list<string> cfgvars = cfg().listSection(name());
   list<string>::const_iterator cfgit;
   for (cfgit=cfgvars.begin(); cfgit!=cfgvars.end(); ++cfgit)
   {
-    string var = "Logic::CFG_" + *cfgit;
+    string var = name() + "::Logic::CFG_" + *cfgit;
     string value;
     cfg().getValue(name(), *cfgit, value);
     m_event_handler->setVariable(var, value);
@@ -961,7 +966,7 @@ ReflectorLogic::~ReflectorLogic(void)
 
 void ReflectorLogic::onConnected(void)
 {
-  std::cout << name() << ": Connection established to "
+  std::cout << "NOTICE: " << name() << ": Connection established to "
             << m_con.remoteHost() << ":" << m_con.remotePort()
             << " (" << (m_con.isPrimary() ? "primary" : "secondary") << ")"
             << std::endl;
@@ -2655,6 +2660,14 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
   setIdle(false);
   LinkManager::instance()->playDtmf(this, digit, amp, duration);
 } /* ReflectorLogic::handlePlayDtmf */
+
+
+bool ReflectorLogic::getConfigValue(const std::string& section,
+                                    const std::string& tag,
+                                    std::string& value)
+{
+  return cfg().getValue(section, tag, value, true);
+} /* ReflectorLogic::getConfigValue */
 
 
 bool ReflectorLogic::loadClientCertificate(void)
