@@ -801,12 +801,23 @@ void ReflectorLogic::remoteCmdReceived(LogicBase* src_logic,
 
 void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 {
-  //cout << "### ReflectorLogic::remoteReceivedTgUpdated: logic="
-  //     << logic->name() << "  tg=" << tg
-  //     << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc << endl;
-  if ((m_selected_tg == 0) && (tg > 0))
+  //std::cout << "### ReflectorLogic::remoteReceivedTgUpdated: logic="
+  //          << logic->name() << "  tg=" << tg
+  //          << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc
+  //          << "  m_tg_select_timeout_cnt=" << m_tg_select_timeout_cnt
+  //          << std::endl;
+  if ((m_selected_tg == 0) && (m_tg_select_timeout_cnt == 0))
   {
-    selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
+    if (tg > 0)
+    {
+      selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
+    }
+    else
+    {
+      std::cout << name() << ": Inhibit TG activation" << std::endl;
+      selectTg(tg, "tg_inhibit_activation", false);
+      m_tg_select_timeout_cnt = m_tg_select_inhibit_timeout;
+    }
     m_tg_local_activity = !m_mute_first_tx_loc;
     m_use_prio = false;
   }
@@ -822,6 +833,11 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
   //     << " data=" << data
   //     << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
+
+  if (m_con_state != STATE_CONNECTED)
+  {
+    return;
+  }
 
   if (event_name == "Voter:sql_state")
   {
@@ -1979,6 +1995,14 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   {
     return;
   }
+  if ((msg.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
+  {
+    std::cerr << "### " << name()
+         << ": Trying to send user message " << msg.type()
+         << " in unauthenticated state"
+         << std::endl;
+    return;
+  }
 
   m_tcp_heartbeat_tx_cnt = TCP_HEARTBEAT_TX_CNT_RESET;
 
@@ -2033,8 +2057,8 @@ bool ReflectorLogic::udpCipherDataReceived(const IpAddress& addr, uint16_t port,
 {
   if (static_cast<size_t>(count) < UdpCipher::AADLEN)
   {
-    std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
-                 "short to hold associated data" << std::endl;
+    //std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
+    //             "short to hold associated data" << std::endl;
     return true;
   }
   stringstream ss;
@@ -2453,8 +2477,14 @@ void ReflectorLogic::onLogicConInStreamIsIdle(bool is_idle)
     m_qsy_pending_timer.reset();
     m_tg_local_activity = true;
     m_use_prio = false;
-    m_tg_select_timeout_cnt =
-      (m_selected_tg > 0) ? m_tg_select_timeout : m_tg_select_inhibit_timeout;
+    if (m_selected_tg > 0)
+    {
+      m_tg_select_timeout_cnt = m_tg_select_timeout;
+    }
+    else if (m_tg_select_timeout_cnt > 0)
+    {
+      m_tg_select_timeout_cnt = m_tg_select_inhibit_timeout;
+    }
   }
 
   if (!m_tg_selection_event.empty())
@@ -2503,6 +2533,10 @@ void ReflectorLogic::tgSelectTimerExpired(void)
         (--m_tg_select_timeout_cnt == 0))
     {
       selectTg(0, "tg_selection_timeout", false);
+      if (m_selected_tg == 0)
+      {
+        std::cout << name() << ": TG activation normal" << std::endl;
+      }
     }
   }
 } /* ReflectorLogic::tgSelectTimerExpired */
@@ -2510,8 +2544,6 @@ void ReflectorLogic::tgSelectTimerExpired(void)
 
 void ReflectorLogic::selectTg(uint32_t tg, const std::string& event, bool unmute)
 {
-  cout << name() << ": Selecting TG #" << tg << endl;
-
   m_tg_selection_event.clear();
   if (!event.empty())
   {
@@ -2524,6 +2556,8 @@ void ReflectorLogic::selectTg(uint32_t tg, const std::string& event, bool unmute
 
   if (tg != m_selected_tg)
   {
+    std::cout << name() << ": Selecting TG #" << tg << std::endl;
+
     sendMsg(MsgSelectTG(tg));
     if (m_selected_tg != 0)
     {
