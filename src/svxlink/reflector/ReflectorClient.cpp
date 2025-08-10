@@ -352,7 +352,10 @@ void ReflectorClient::updateIsTalker(void)
   if (m_status != nullptr)
   {
     auto talker = TGHandler::instance()->talkerForTG(m_current_tg);
-    (*m_status)["isTalker"] = (talker == this);
+    (*m_status)["isTalker"] = (
+        TGHandler::instance()->showActivity(m_current_tg) &&
+        (talker == this)
+        );
   }
 } /* ReflectorClient:;updateIsTalker */
 
@@ -476,34 +479,48 @@ void ReflectorClient::onSslConnectionReady(TcpConnection *con)
 void ReflectorClient::onFrameReceived(FramedTcpConnection *con,
                                       std::vector<uint8_t>& data)
 {
-  int len = data.size();
-  //cout << "### ReflectorClient::onFrameReceived: len=" << len << endl;
-
-  assert(len >= 0);
-
   if ((m_con_state == STATE_DISCONNECTED) ||
       (m_con_state == STATE_EXPECT_DISCONNECT))
   {
     return;
   }
 
-  char *buf = reinterpret_cast<char*>(&data.front());
+  int len = data.size();
+  assert(len >= 0);
+  auto buf = reinterpret_cast<const char*>(data.data());
   stringstream ss;
   ss.write(buf, len);
+
+  std::stringstream idss;
+  if (m_callsign.empty())
+  {
+    idss << m_con->remoteHost() << ":" << m_con->remotePort();
+  }
+  else
+  {
+    idss << m_callsign;
+  }
 
   ReflectorMsg header;
   if (!header.unpack(ss))
   {
-    if (!m_callsign.empty())
-    {
-      cout << m_callsign << ": ";
-    }
-    else
-    {
-      cout << m_con->remoteHost() << ":" << m_con->remotePort() << " ";
-    }
-    cout << "ERROR: Unpacking failed for TCP message header" << endl;
-    sendError("Protocol message header too short");
+    std::cout << "*** ERROR[" << idss.str()
+              << "]: Unpacking failed for TCP message header"
+              << std::endl;
+    sendError("Protocol error");
+    return;
+  }
+
+  if ((m_con_state != STATE_CONNECTED) && (header.type() >= 100))
+  {
+      // FIXME: This should really be an error and the client should be
+      // disconnected but it will cause too much problems in existing
+      // misbeaving clients at the moment.
+    std::cout << "*** WARNING[" << idss.str()
+              << "]: User message " << header.type()
+              << " received in unauthenticated state"
+              << std::endl;
+    //sendError("Protocol error");
     return;
   }
 
