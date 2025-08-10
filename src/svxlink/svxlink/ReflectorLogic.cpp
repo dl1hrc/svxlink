@@ -806,13 +806,13 @@ void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
   //          << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc
   //          << "  m_tg_select_timeout_cnt=" << m_tg_select_timeout_cnt
   //          << std::endl;
-  if (m_selected_tg == 0)
+  if ((m_selected_tg == 0) && (m_tg_select_timeout_cnt == 0))
   {
     if (tg > 0)
     {
       selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
     }
-    else if (m_tg_select_timeout_cnt == 0)
+    else
     {
       std::cout << name() << ": Inhibit TG activation" << std::endl;
       selectTg(tg, "tg_inhibit_activation", false);
@@ -833,6 +833,11 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
   //     << " data=" << data
   //     << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
+
+  if (m_con_state != STATE_CONNECTED)
+  {
+    return;
+  }
 
   if (event_name == "Voter:sql_state")
   {
@@ -1990,6 +1995,14 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   {
     return;
   }
+  if ((msg.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
+  {
+    std::cerr << "### " << name()
+         << ": Trying to send user message " << msg.type()
+         << " in unauthenticated state"
+         << std::endl;
+    return;
+  }
 
   m_tcp_heartbeat_tx_cnt = TCP_HEARTBEAT_TX_CNT_RESET;
 
@@ -2044,8 +2057,8 @@ bool ReflectorLogic::udpCipherDataReceived(const IpAddress& addr, uint16_t port,
 {
   if (static_cast<size_t>(count) < UdpCipher::AADLEN)
   {
-    std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
-                 "short to hold associated data" << std::endl;
+    //std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
+    //             "short to hold associated data" << std::endl;
     return true;
   }
   stringstream ss;
