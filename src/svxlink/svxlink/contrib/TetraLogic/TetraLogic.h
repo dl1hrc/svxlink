@@ -59,7 +59,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Logic.h"
 #include "Squelch.h"
 #include "DapNetClient.h"
-
+#include "Module.h"
 
 /****************************************************************************
  *
@@ -70,7 +70,8 @@ namespace Async
 {
   class Timer;
 };
-
+class EventHandler;
+class Module;
 
 
 /****************************************************************************
@@ -371,6 +372,7 @@ class TetraLogic : public Logic
     std::string vendor;
     std::string model;
     int inactive_time;
+    EventHandler *event_handler;
 
     void initPei(void);
     void onCharactersReceived(char *buf, int count);
@@ -430,6 +432,9 @@ class TetraLogic : public Logic
     void userRegTimeout(Async::Timer *timer);
     void checkUserReg(void);
     void registerUser(std::string tsi);
+    void sendSds(const std::string& issi, const std::string& message);
+    bool getConfigValue(const std::string& section,
+         const std::string& tag, std::string& value);
     std::string jsonToString(Json::Value eventmessage);
 };  /* class TetraLogic */
 

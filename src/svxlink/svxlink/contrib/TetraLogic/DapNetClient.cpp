@@ -76,7 +76,7 @@ using namespace SvxLink;
  ****************************************************************************/
 
 #define DAPNETSOFT "SvxLink-TetraGw"
-#define DAPNETVERSION "v19052022"
+#define DAPNETVERSION "v29092025"
 
 #define INVALID 0
 
@@ -147,6 +147,8 @@ DapNetClient::~DapNetClient(void)
   dapcon = 0;
   delete dapwebcon;
   dapwebcon = 0;
+  delete dapnet_comtimeout_timer;
+  dapnet_comtimeout_timer = 0;
 } /* DapNetClient::~DapNetClient */
 
 
@@ -155,22 +157,22 @@ bool DapNetClient::initialize(void)
   bool isok = true;
   cfg.getValue(name, "DEBUG", debug);
   cfg.getValue(name, "DAPNET_CALLSIGN", callsign);
-  
+
   if (cfg.getValue(name, "DAPNET_SERVER", dapnet_server))
   {
     if (!cfg.getValue(name, "DAPNET_PORT", dapnet_port))
     {
-      cout << "*** ERROR: DAPNET_SERVER defined but no DAPNET_PORT in " 
-           << name << endl;
+      dapnetLogmessage(LOGERROR,
+       "*** ERROR: DAPNET_SERVER defined but no DAPNET_PORT in " + name);
       isok = false;
     }
     if (!cfg.getValue(name, "DAPNET_KEY", dapnet_key))
     {
-      cout << "*** ERROR: DAPNET_SERVER defined but no DAPNET_KEY in " 
-           << name << endl;
+      dapnetLogmessage(LOGERROR,
+       "*** ERROR: DAPNET_SERVER defined but no DAPNET_KEY in " + name);
       isok = false;
     }
-    
+
     string ric_section;
     string value;
     list<string>::iterator slit;
@@ -183,17 +185,17 @@ bool DapNetClient::initialize(void)
         cfg.getValue(ric_section, *slit, value);
         if (rmatch(value, "[^0-9,]"))
         {
-          cout << "*** ERROR: Config line in section [" << ric_section
-               << "] for RIC " << *slit << " contains invalid characters. Only"
-               << " the numbers 0-9 and comma are allowed." << endl;
+          dapnetLogmessage(LOGERROR, "*** ERROR: Config line in section [" +
+          ric_section + "] for RIC " + *slit +
+        " contains invalid characters. Only the numbers 0-9 and comma are allowed.");
           isok = false;
         }
 
         size_t listlen = SvxLink::splitStr(issiList, value, ",");
         if (listlen < 1)
         {
-          cout << "*** ERROR: ISSI expected in section [" << ric_section
-               << "] for RIC " << *slit << endl;
+          dapnetLogmessage(LOGERROR, "*** ERROR: ISSI expected in section [" +
+               ric_section + "] for RIC " + *slit);
           isok = false;
         }
         else
@@ -205,8 +207,8 @@ bool DapNetClient::initialize(void)
     }
     else
     {
-      cout << "*** ERROR: You need a section DAPNET_RIC2ISSI=[xxx] in "
-           << name << endl;
+      dapnetLogmessage(LOGINFO,
+           "*** ERROR: You need a section DAPNET_RIC2ISSI=[xxx] in " + name);
       isok = false;
     }
 
@@ -214,7 +216,7 @@ bool DapNetClient::initialize(void)
     if (cfg.getValue(name, "DAPNET_RUBRIC_REGISTRATION", ric_section))
     {
       list<string> dn2ric_list = cfg.listSection(ric_section);
-      
+
       for (slit=dn2ric_list.begin(); slit!=dn2ric_list.end(); slit++)
       {
         cfg.getValue(ric_section, *slit, value);
@@ -222,7 +224,19 @@ bool DapNetClient::initialize(void)
         dapnetLogmessage(LOGINFO, "RIC:" + *slit + "=rubrics:" + value);
       }
     }
-    
+
+    int comtimeout(130000);
+    if (cfg.getValue(name, "DAPNET_SERVER_TIMEOUT", comtimeout))
+    {
+      if (comtimeout < 61 || comtimeout > 600)
+      {
+        comtimeout = 130;
+        dapnetLogmessage(LOGWARN, "+++ Setting " + name +
+          "/DAPNET_SERVER_TIMEOUT to a reasonable value (130 secs).");
+      }
+      comtimeout *= 1000;
+    }
+
     dapcon = new TcpClient<>(dapnet_server, dapnet_port);
     dapcon->connected.connect(mem_fun(*this, 
                             &DapNetClient::onDapnetConnected));
@@ -235,19 +249,25 @@ bool DapNetClient::initialize(void)
     reconnect_timer->setEnable(false);
     reconnect_timer->expired.connect(mem_fun(*this,
                  &DapNetClient::reconnectDapnetServer));
+    dapnet_comtimeout_timer = new Timer(120000);
+    dapnet_comtimeout_timer->setEnable(false);
+    dapnet_comtimeout_timer->expired.connect(mem_fun(*this,
+                 &DapNetClient::responseTimeout));
   }
-  
+
     // connector for sending messages over DAPNET web api
   if (cfg.getValue(name, "DAPNET_USERNAME", dapnet_username))
   {
     if (!cfg.getValue(name, "DAPNET_PASSWORD", dapnet_password))
     {
-      cout << "*** ERROR: " << name << "/DAPNET_PASSWORD not set" << endl;
+      dapnetLogmessage(LOGERROR, "*** ERROR: " + name +
+            "/DAPNET_PASSWORD not set");
       isok = false;
     }
     if (!cfg.getValue(name, "DAPNET_WEBHOST", dapnet_webhost))
     {
-      cout << "*** ERROR: " << name << "/DAPNET_WEBHOST not set" << endl;
+      dapnetLogmessage(LOGERROR, "*** ERROR: " + name +
+            "/DAPNET_WEBHOST not set");
       isok = false;
     }
     if (!cfg.getValue(name, "DAPNET_WEBPORT", dapnet_webport))
@@ -267,6 +287,7 @@ bool DapNetClient::initialize(void)
                             &DapNetClient::onDapwebDisconnected));
     dapwebcon->dataReceived.connect(mem_fun(*this, 
                             &DapNetClient::onDapwebDataReceived));
+    cout << "DAPNET client, version " << DAPNETVERSION << " started." << endl;
   }
 
   return isok;
@@ -278,7 +299,7 @@ bool DapNetClient::sendDapMessage(std::string call, std::string message)
   transform(call.begin(), call.end(), call.begin(), ::tolower);
   destcall = call;
   destmessage = message;
-  
+
   dapnetLogmessage(LOGTRACE, "DapNetClient::sendDapMessage: destcall="
         + destcall + ", message=" + destmessage);
   dapwebcon->connect();
@@ -307,15 +328,16 @@ void DapNetClient::onDapnetConnected(void)
   log << "DAPNET connection established to " << dapcon->remoteHost() << ":"
       << dapcon->remotePort();
   dapnetLogmessage(LOGINFO, log.str());
-    
+
   stringstream ss;
   ss << "[" << DAPNETSOFT << " " << DAPNETVERSION << " " << callsign <<  " "
      << dapnet_key << "]\r\n";
   dapnetLogmessage(LOGDEBUG, ss.str());
   dapcon->write(ss.str().c_str(), ss.str().length());
   reconnect_timer->setEnable(false);
+  dapnet_comtimeout_timer->setEnable(true);
 } /* DapNetClient::onDapnetConnected */
-    
+
 
 void DapNetClient::onDapnetDisconnected(TcpConnection *con, 
                 TcpClient<>::DisconnectReason reason)
@@ -325,6 +347,8 @@ void DapNetClient::onDapnetDisconnected(TcpConnection *con,
   dapnetLogmessage(LOGINFO, ss.str());
   reconnect_timer->reset();
   reconnect_timer->setEnable(true);
+  dapnet_comtimeout_timer->reset();
+  dapnet_comtimeout_timer->setEnable(false);
 } /* DapNetClient::onDapnetDisconnected */
 
 
@@ -339,7 +363,7 @@ int DapNetClient::onDapnetDataReceived(TcpConnection *con, void *buf, int count)
   {
     dapmessage.erase();
   }
-  
+
   while ((found = dapmessage.find("\n")) != string::npos)
   {
     if (found != 0)
@@ -348,6 +372,9 @@ int DapNetClient::onDapnetDataReceived(TcpConnection *con, void *buf, int count)
       dapmessage.erase(0, found+1);
     }
   }
+
+  dapnet_comtimeout_timer->reset();
+
   return count;
 } /* DapNetClient::onDapnetDataReceived */
 
@@ -683,6 +710,14 @@ string DapNetClient::rot1code(string inmessage)
   }
   return outmessage;
 } /* DapNetClient::rot1code */
+
+
+void DapNetClient::responseTimeout(Async::Timer *timer)
+{
+  dapnetLogmessage(LOGWARN,
+     "+++ WARNING: No messages from DAPNET server anymore, reconnecting...");
+  dapcon->disconnect();
+} /* DapNetClient::responseTimeout */
 
 /*
  * This file has not been truncated

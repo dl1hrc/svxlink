@@ -13,6 +13,9 @@ install(TARGETS TetraLogic DESTINATION ${SVX_LOGIC_CORE_INSTALL_DIR})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/TetraLogic.tcl
   DESTINATION ${SVX_SHARE_INSTALL_DIR}/events.d
 )
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/TetraLogicType.tcl
+  DESTINATION ${SVX_SHARE_INSTALL_DIR}/events.d
+)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/TetraLogic.conf.in
   ${CMAKE_CURRENT_BINARY_DIR}/TetraLogic.conf
   @ONLY

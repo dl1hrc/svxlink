@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2023 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -63,7 +63,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "TetraLogic.h"
 #include "TetraLib.h"
 #include "common.h"
-
+#include "EventHandler.h"
+#include "config.h"
 
 /****************************************************************************
  *
@@ -134,7 +135,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "08022025"
+#define TETRA_LOGIC_VERSION "29092025"
 
 /****************************************************************************
  *
@@ -247,7 +248,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   string value;
   if (!cfg().getValue(name(), "ISSI", issi))
   {
-     cerr << "*** ERROR: Missing parameter " << name() << "/ISSI" << endl;
+     log(LOGERROR, "*** ERROR: Missing parameter " + name() + "/ISSI");
      isok = false;
   }
 
@@ -255,12 +256,12 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
 
   if (!cfg().getValue(name(), "MCC", mcc))
   {
-     cerr << "*** ERROR: Missing parameter " << name() << "/MCC" << endl;
+     log(LOGERROR, "*** ERROR: Missing parameter " + name() + "/MCC");
      isok = false;
   }
   if (atoi(mcc.c_str()) > 901)
   {
-     cerr << "*** ERROR: Country code (MCC) must be 901 or less" << endl;
+     log(LOGERROR, "*** ERROR: Country code (MCC) must be 901 or less");
      isok = false;
   }
   if (mcc.length() < 4)
@@ -279,12 +280,12 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   }
   if (!cfg().getValue(name(), "MNC", mnc))
   {
-    cerr << "*** ERROR: Missing parameter " << name() << "/MNC" << endl;
+    log(LOGERROR, "*** ERROR: Missing parameter " + name() + "/MNC");
     isok = false;
   }
   if (atoi(mnc.c_str()) > 16383)
   {
-    cerr << "*** ERROR: Network code (MNC) must be 16383 or less" << endl;
+    log(LOGERROR, "*** ERROR: Network code (MNC) must be 16383 or less");
     isok = false;
   }
   if (mnc.length() < 5)
@@ -316,10 +317,12 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     if (value.length() != 2)
     {
       isok = false;
-      cout << "*** ERROR: " << name() << "/DEFAULT_APRS_ICON "
+      stringstream ss;
+      ss << "*** ERROR: " << name() << "/DEFAULT_APRS_ICON "
            << "must have 2 characters, e.g. '/e' or if the backslash or "
            << "a comma is used it has to be encoded with an additional "
-           << "'\', e.g. " << "DEFAULT_APRS_ICON=\\r" << endl;
+           << "'\', e.g. " << "DEFAULT_APRS_ICON=\\r";
+      log(LOGERROR, ss.str());
     }
     else
     {
@@ -336,9 +339,9 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     sds_pty = new Pty(sds_pty_path);
     if (!sds_pty->open())
     {
-      cerr << "*** ERROR: Could not open Sds PTY "
-           << sds_pty_path << " as specified in configuration variable "
-           << name() << "/" << "SDS_PTY" << endl;
+      log(LOGERROR, "*** ERROR: Could not open Sds PTY " +
+        sds_pty_path + " as specified in configuration variable " +
+        name() + "/" + "SDS_PTY");
       isok = false;
     }
     sds_pty->dataReceived.connect(
@@ -642,9 +645,11 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       isds = static_cast<unsigned int>(std::stoul(*slit));
       if(isds < 32768 || isds > 65536)
       {
-        cout << "*** ERROR: Sds decimal value in section " << name()
-             << "/TETRA_STATUS is not valid (" << isds
-             << "), must be between 32768 and 65535" << endl;
+        stringstream ss;
+        ss << "*** ERROR: Sds decimal value in section " << name() <<
+          "/TETRA_STATUS is not valid (" << isds <<
+          "), must be between 32768 and 65535";
+        log(LOGERROR, ss.str());
       }
       else
       {
@@ -672,7 +677,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       inactive_time = 3600;
     }
   }
-  
+
   cfg().getValue(name(), "END_CMD", endCmd);
 
   std::string dapnet_server;
@@ -685,7 +690,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
                     &TetraLogic::onDapnetLogmessage));
     if (!dapnetclient->initialize())
     {
-      cerr << "*** ERROR: initializing DAPNET client" << endl;
+      log(LOGERROR, "*** ERROR: initializing DAPNET client");
       isok = false;
     }
   }
@@ -699,9 +704,9 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     pei_pty = new Pty(pei_pty_path);
     if (!pei_pty->open())
     {
-      cerr << "*** ERROR: Could not open Pei PTY "
-           << pei_pty_path << " as specified in configuration variable "
-           << name() << "/" << "PEI_PTY" << endl;
+      log(LOGERROR, "*** ERROR: Could not open Pei PTY " +
+        pei_pty_path + " as specified in configuration variable " +
+        name() + "/" + "PEI_PTY");
       isok = false;
     }
     pei_pty->dataReceived.connect(
@@ -728,8 +733,8 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   pei = new Serial(port);
   if (!pei->open())
   {
-    cerr << "*** ERROR: Opening serial port " << name() << "/PORT="
-         << port << endl;
+    log(LOGERROR, "*** ERROR: Opening serial port " + name() + "/PORT="
+         + port);
     isok = false;
   }
   pei->setParams(baudrate, Serial::PARITY_NONE, 8, 1, Serial::FLOW_NONE);
@@ -748,13 +753,57 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   rxValveSetOpen(true);
   setTxCtrlMode(Tx::TX_AUTO);
 
+  /** Event handler **/
+  string event_handler_str(SVX_SHARE_INSTALL_DIR);
+  event_handler_str += "/events.tcl";
+  cfg().getValue(name(), "EVENT_HANDLER", event_handler_str);
+
+  if (event_handler_str.empty())
+  {
+    log(LOGERROR,
+      "*** ERROR: Config variable " + name() + "/EVENT_HANDLER is not set.");
+    isok = false;
+  }
+
+  event_handler = new EventHandler(event_handler_str, name());
+  event_handler->getConfigValue.connect(sigc::mem_fun(*this,
+                &TetraLogic::getConfigValue));
+  event_handler->setVariable("logic_name", name());
+  event_handler->setVariable("logic_type", type());
+  event_handler->setVariable("active_module", "");
+  event_handler->setVariable("sds_pty_path", sds_pty_path);
+ // event_handler->sendSds.connect(sigc::mem_fun(*this, &TetraLogic::sendSds);
+
+  std::string loaded_modules;
+  std::list<Module*> modules = Logic::moduleList();
+  std::list<Module*>::const_iterator mit;
+
+  for (mit=modules.begin(); mit!=modules.end(); mit++)
+  {
+    if (!loaded_modules.empty())
+    {
+      loaded_modules += " ";
+    }
+    loaded_modules += (*mit)->name();
+  }
+
+  event_handler->setVariable("loaded_modules", loaded_modules);
+  event_handler->processEvent("namespace eval " + name() + "::Logic {}");
+
+  if (!event_handler->initialize())
+  {
+    log(LOGERROR, "*** ERROR initializing event handler in TetraLogic.");
+    isok = false;
+  }
+
   processEvent("startup");
 
-  cout << ">>> Started SvxLink with special TetraLogic extension (v"
-       << TETRA_LOGIC_VERSION << ")" << endl;
-  cout << ">>> No guarantee! Please send a bug report to\n"
-       << ">>> Adi/DL1HRC <dl1hrc@gmx.de> or use the groups.io mailing list"
+  cout << "TetraLogic version "<< string(TETRA_LOGIC_VERSION) << " started."
        << endl;
+  log(LOGINFO, ">>> Started SvxLink with special TetraLogic extension (v" +
+                   string(TETRA_LOGIC_VERSION) + ")");
+  log(LOGINFO, ">>> No guarantee! Please send a bug report to");
+  log(LOGINFO, ">>> Adi/DL1HRC <dl1hrc@gmx.de> or use the groups.io mailing list");
 
   // std::string mysds;
   // createSDS(mysds, "2620055", "Das ist ein Test vom lieben Adi.");
@@ -767,14 +816,14 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   // std::string sds = "0A06D0103EC61871000810"; // VK
   // LipInfo li;
   // handleLipSds(sds, li);
- /* cout << "Lipinfo: " << sds << endl;
+  /* cout << "Lipinfo: " << sds << endl;
     cout << "Result, lat=" << dec2nmea_lat(li.latitude) << ", lon="
          << dec2nmea_lon(li.longitude) << ", pos error=" << li.positionerror
          << ", horizontalvel=" << li.horizontalvelocity << ", directionoftravel="
          << li.directionoftravel << ", reasonforsending="
          << li.reasonforsending << endl;
     cout << "Latitude=" << li.latitude << ", longitude=" << li.longitude << endl;
- */
+  */
   return isok;
 
 } /* TetraLogic::initialize */
@@ -1317,7 +1366,7 @@ void TetraLogic::handleCallBegin(std::string message)
 */
 void TetraLogic::handleSds(std::string sds)
 {
-  cout << "***handleSds: " << sds << endl;
+  log(LOGDEBUG, "***handleSds: " + sds);
   sds.erase(0,9);  // remove "+CTSDSR: "
 
   // store header of sds for further handling
@@ -1369,8 +1418,7 @@ void TetraLogic::firstContact(Sds tsds)
 */
 void TetraLogic::handleSdsMsg(std::string sds)
 {
-  cout << "***handleSdsMsg: " << sds << endl;
-
+  log(LOGDEBUG, "***handleSdsMsg: " + sds);
   log(LOGTRACE, "TetraLogic::handleSdsMsg: " + sds);
   Sds t_sds;
   stringstream ss, sstcl;
@@ -1645,7 +1693,7 @@ void TetraLogic::handleCmgs(std::string m_message)
 
 std::string TetraLogic::handleTextSds(std::string m_message)
 {
-  cout << "***handleTextSds: " << m_message << endl;
+  log(LOGDEBUG, "***handleTextSds: " + m_message);
 
   if (m_message.length() > 8) m_message.erase(0,8);  // delete 00A3xxxx
   return decodeSDS(m_message);
@@ -1662,7 +1710,7 @@ string TetraLogic::handleAckSds(string m_message, string tsi)
 
 std::string TetraLogic::handleSimpleTextSds(std::string m_message)
 {
-  cout << "***handleSimpleTextSds: " << m_message << endl;
+  log(LOGDEBUG, "***handleSimpleTextSds: " + m_message);
   if (m_message.length() > 4) m_message.erase(0,4);  // delete 0201
   return decodeSDS(m_message);
 } /* TetraLogic::handleSimpleTextSds */
@@ -2765,6 +2813,20 @@ void TetraLogic::checkUserReg(void)
     }
   }
 } /* TetraLogic::checkUserReg */
+
+
+void TetraLogic::sendSds(const std::string& issi, const std::string& message)
+{
+
+} /* TetraLogic::sendSds */
+
+
+bool TetraLogic::getConfigValue(const std::string& section,
+                               const std::string& tag,
+                               std::string& value)
+{
+  return cfg().getValue(section, tag, value, true);
+} /* TetraLogic::getConfigValue */
 
 
 std::string TetraLogic::jsonToString(Json::Value eventmessage)

@@ -187,6 +187,7 @@ class DapNetClient : public Async::TcpClient<>
     std::string                txgroup;
     std::string                destcall;
     std::string                destmessage;
+    Async::Timer              *dapnet_comtimeout_timer;
         
     DapNetClient(const DapNetClient&);
     DapNetClient& operator=(const DapNetClient&);
@@ -210,6 +211,7 @@ class DapNetClient : public Async::TcpClient<>
     int checkDapMessage(std::string mesg);
     bool rmatch(std::string tok, std::string pattern);
     std::string rot1code(std::string inmessage);
+    void responseTimeout(Async::Timer *t);
 };  /* class DapNetClient */
 
 

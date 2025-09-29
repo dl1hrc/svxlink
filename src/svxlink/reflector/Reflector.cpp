@@ -31,7 +31,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <cassert>
-#include <json/json.h>
 #include <unistd.h>
 #include <algorithm>
 #include <fstream>
@@ -257,6 +256,7 @@ Reflector::Reflector(void)
                     << std::endl;
         }
       });
+  m_status["nodes"] = Json::Value(Json::objectValue);
 } /* Reflector::Reflector */
 
 
@@ -1099,6 +1099,16 @@ Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
 } /* Reflector::csrReceived */
 
 
+Json::Value& Reflector::clientStatus(const std::string& callsign)
+{
+  if (!m_status.isMember(callsign))
+  {
+    m_status["nodes"][callsign] = Json::Value(Json::objectValue);
+  }
+  return m_status["nodes"][callsign];
+} /* Reflector::clientStatus */
+
+
 /****************************************************************************
  *
  * Protected member functions
@@ -1147,6 +1157,7 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
 
   if (!client->callsign().empty())
   {
+    m_status["nodes"].removeMember(client->callsign());
     broadcastMsg(MsgNodeLeft(client->callsign()),
         ReflectorClient::ExceptFilter(client));
   }
@@ -1559,6 +1570,7 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
   if (old_talker != 0)
   {
     cout << old_talker->callsign() << ": Talker stop on TG #" << tg << endl;
+    old_talker->updateIsTalker();
     broadcastMsg(MsgTalkerStop(tg, old_talker->callsign()),
         ReflectorClient::mkAndFilter(
           ge_v2_client_filter,
@@ -1577,6 +1589,7 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
   if (new_talker != 0)
   {
     cout << new_talker->callsign() << ": Talker start on TG #" << tg << endl;
+    new_talker->updateIsTalker();
     broadcastMsg(MsgTalkerStart(tg, new_talker->callsign()),
         ReflectorClient::mkAndFilter(
           ge_v2_client_filter,
@@ -1588,7 +1601,7 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
       broadcastMsg(MsgTalkerStartV1(new_talker->callsign()), v1_client_filter);
     }
   }
-} /* Reflector::setTalker */
+} /* Reflector::onTalkerUpdated */
 
 
 void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
@@ -1674,10 +1687,10 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
               Json::Value& rx(qth["rx"][rx_id_str]);
               if (client->rxExist(rx_id))
               {
-                rx["siglev"] = client->rxSiglev(rx_id);
-                rx["enabled"] = client->rxEnabled(rx_id);
-                rx["sql_open"] = client->rxSqlOpen(rx_id);
-                rx["active"] = client->rxActive(rx_id);
+                rx["siglev"] = client->getRxSiglev(rx_id);
+                rx["enabled"] = client->getRxEnabled(rx_id);
+                rx["sql_open"] = client->getRxSqlOpen(rx_id);
+                rx["active"] = client->getRxActive(rx_id);
               }
             }
           }
@@ -1696,7 +1709,7 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
               Json::Value& tx(qth["tx"][tx_id_str]);
               if (client->txExist(tx_id))
               {
-                tx["transmit"] = client->txTransmit(tx_id);
+                tx["transmit"] = client->getTxTransmit(tx_id);
               }
             }
           }
@@ -1705,18 +1718,17 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
     }
     status["nodes"][client->callsign()] = node;
   }
+
   std::ostringstream os;
   Json::StreamWriterBuilder builder;
   builder["commentStyle"] = "None";
   builder["indentation"] = ""; //The JSON document is written on a single line
   Json::StreamWriter* writer = builder.newStreamWriter();
-  writer->write(status, &os);
+  writer->write(m_status, &os);
   delete writer;
+
   res.setContent("application/json", os.str());
-  if (req.method == "HEAD")
-  {
-    res.setSendContent(false);
-  }
+  res.setSendContent(req.method == "GET");
   res.setCode(200);
   con->write(res);
 } /* Reflector::requestReceived */
