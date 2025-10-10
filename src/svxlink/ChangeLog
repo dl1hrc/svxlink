@@ -65,6 +65,11 @@
   - Potential buffer overflow fixed
   - Last defined tone was never detected
 
+* Add support for GPIOD v2.
+  Thanks to Rui Barreiros for implementing this.
+
+* Add support for sigc++3
+
 
 
  1.9.1 -- 01 Jul 2025

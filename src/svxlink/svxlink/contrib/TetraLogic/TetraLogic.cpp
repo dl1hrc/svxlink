@@ -64,6 +64,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "TetraLib.h"
 #include "common.h"
 #include "EventHandler.h"
+#include "Module.h"
 #include "config.h"
 
 /****************************************************************************
@@ -135,7 +136,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "29092025"
+#define TETRA_LOGIC_VERSION "03102025"
 
 /****************************************************************************
  *
@@ -179,7 +180,7 @@ class TetraLogic::Call
  ****************************************************************************/
 
 extern "C" {
-  LogicBase* construct(void) { return new TetraLogic; }
+  Logic* construct(void) { return new TetraLogic; }
 }
 
 
@@ -772,7 +773,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   event_handler->setVariable("logic_type", type());
   event_handler->setVariable("active_module", "");
   event_handler->setVariable("sds_pty_path", sds_pty_path);
- // event_handler->sendSds.connect(sigc::mem_fun(*this, &TetraLogic::sendSds);
+ // event_handler->sendSds.connect(sigc::mem_fun(*this, &TetraLogic::sendSds));
 
   std::string loaded_modules;
   std::list<Module*> modules = Logic::moduleList();
@@ -829,7 +830,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
 } /* TetraLogic::initialize */
 
 
-void TetraLogic::remoteCmdReceived(LogicBase* src_logic, const std::string& cmd)
+void TetraLogic::remoteCmdReceived(Logic* src_logic, const std::string& cmd)
 {
   log(LOGTRACE, "TetraLogic::remoteCmdReceived: "
            + src_logic->name() + " -> " + cmd);

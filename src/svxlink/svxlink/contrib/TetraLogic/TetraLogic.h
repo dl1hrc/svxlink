@@ -59,7 +59,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Logic.h"
 #include "Squelch.h"
 #include "DapNetClient.h"
-#include "Module.h"
 
 /****************************************************************************
  *
@@ -70,8 +69,6 @@ namespace Async
 {
   class Timer;
 };
-class EventHandler;
-class Module;
 
 
 /****************************************************************************
@@ -140,7 +137,7 @@ class TetraLogic : public Logic
     /**
      * @brief   is called up when a command from an other logic has been received
      */
-    virtual void remoteCmdReceived(LogicBase* src_logic,
+    virtual void remoteCmdReceived(Logic* src_logic,
                                    const std::string& cmd);
 
   protected:

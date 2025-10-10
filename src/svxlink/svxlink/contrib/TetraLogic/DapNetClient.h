@@ -146,13 +146,13 @@ class DapNetClient : public Async::TcpClient<>
      * @brief A signal that is emitted when a message has been received
      * @param msg The received message
      */
-    sigc::signal<void, std::string, std::string> dapnetMessageReceived;
+    sigc::signal<void(std::string, std::string)> dapnetMessageReceived;
 
     /**
      * @brief A signal that is emitted when a log message is send
      * @param msg The received message
      */
-    sigc::signal<void, uint8_t, std::string> dapnetLogmessage;
+    sigc::signal<void(uint8_t, std::string)> dapnetLogmessage;
 
     /**
      *
@@ -188,7 +188,8 @@ class DapNetClient : public Async::TcpClient<>
     std::string                destcall;
     std::string                destmessage;
     Async::Timer              *dapnet_comtimeout_timer;
-        
+    Async::Timer              *force_disconnect_timer;
+
     DapNetClient(const DapNetClient&);
     DapNetClient& operator=(const DapNetClient&);
     
@@ -212,6 +213,9 @@ class DapNetClient : public Async::TcpClient<>
     bool rmatch(std::string tok, std::string pattern);
     std::string rot1code(std::string inmessage);
     void responseTimeout(Async::Timer *t);
+    void forceDisconnect(void);
+    void forceDisconnectServer(Async::Timer *t);
+
 };  /* class DapNetClient */
 
 

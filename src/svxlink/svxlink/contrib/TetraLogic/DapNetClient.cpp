@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2021 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -76,7 +76,7 @@ using namespace SvxLink;
  ****************************************************************************/
 
 #define DAPNETSOFT "SvxLink-TetraGw"
-#define DAPNETVERSION "v29092025"
+#define DAPNETVERSION "08102025"
 
 #define INVALID 0
 
@@ -149,6 +149,8 @@ DapNetClient::~DapNetClient(void)
   dapwebcon = 0;
   delete dapnet_comtimeout_timer;
   dapnet_comtimeout_timer = 0;
+  delete force_disconnect_timer;
+  force_disconnect_timer = 0;
 } /* DapNetClient::~DapNetClient */
 
 
@@ -245,17 +247,23 @@ bool DapNetClient::initialize(void)
     dapcon->dataReceived.connect(mem_fun(*this, 
                             &DapNetClient::onDapnetDataReceived));
     dapcon->connect();
-    reconnect_timer = new Timer(5000);
+    reconnect_timer = new Timer(10000);
     reconnect_timer->setEnable(false);
     reconnect_timer->expired.connect(mem_fun(*this,
                  &DapNetClient::reconnectDapnetServer));
-    dapnet_comtimeout_timer = new Timer(120000);
+
+    dapnet_comtimeout_timer = new Timer(comtimeout);
     dapnet_comtimeout_timer->setEnable(false);
     dapnet_comtimeout_timer->expired.connect(mem_fun(*this,
                  &DapNetClient::responseTimeout));
+
+    force_disconnect_timer = new Timer(5000);
+    force_disconnect_timer->setEnable(false);
+    force_disconnect_timer->expired.connect(mem_fun(*this,
+                 &DapNetClient::forceDisconnectServer));
   }
 
-    // connector for sending messages over DAPNET web api
+    // connector to send messages over DAPNET web api
   if (cfg.getValue(name, "DAPNET_USERNAME", dapnet_username))
   {
     if (!cfg.getValue(name, "DAPNET_PASSWORD", dapnet_password))
@@ -277,7 +285,7 @@ bool DapNetClient::initialize(void)
     cfg.getValue(name, "DAPNET_WEBPATH", dapnet_webpath);
     if (!cfg.getValue(name, "DAPNET_TXGROUP", txgroup))
     {
-      dapnetLogmessage(LOGWARN, "+++ DAPNET_TXGROUP not set, take 'dl-all'.");
+      dapnetLogmessage(LOGWARN, "+++ DAPNET_TXGROUP not set, set to 'dl-all'.");
       txgroup = "dl-all";
     }
     dapwebcon = new TcpClient<>(dapnet_webhost, dapnet_webport);
@@ -287,7 +295,7 @@ bool DapNetClient::initialize(void)
                             &DapNetClient::onDapwebDisconnected));
     dapwebcon->dataReceived.connect(mem_fun(*this, 
                             &DapNetClient::onDapwebDataReceived));
-    cout << "DAPNET client, version " << DAPNETVERSION << " started." << endl;
+    cout << "DAPNET client, v" << DAPNETVERSION << " started." << endl;
   }
 
   return isok;
@@ -330,7 +338,7 @@ void DapNetClient::onDapnetConnected(void)
   dapnetLogmessage(LOGINFO, log.str());
 
   stringstream ss;
-  ss << "[" << DAPNETSOFT << " " << DAPNETVERSION << " " << callsign <<  " "
+  ss << "[" << DAPNETSOFT << " v" << DAPNETVERSION << " " << callsign <<  " "
      << dapnet_key << "]\r\n";
   dapnetLogmessage(LOGDEBUG, ss.str());
   dapcon->write(ss.str().c_str(), ss.str().length());
@@ -347,8 +355,8 @@ void DapNetClient::onDapnetDisconnected(TcpConnection *con,
   dapnetLogmessage(LOGINFO, ss.str());
   reconnect_timer->reset();
   reconnect_timer->setEnable(true);
-  dapnet_comtimeout_timer->reset();
   dapnet_comtimeout_timer->setEnable(false);
+  force_disconnect_timer->setEnable(false);
 } /* DapNetClient::onDapnetDisconnected */
 
 
@@ -390,7 +398,7 @@ void DapNetClient::onDapwebConnected(void)
 {
   dapnetLogmessage(LOGINFO, "connected to Dapnet " + dapnet_webhost
       + ":" + to_string(dapnet_webport));
-  
+
   string auth = dapnet_username;
   auth += ":";
   auth += dapnet_password;
@@ -414,7 +422,7 @@ void DapNetClient::onDapwebConnected(void)
      << "Content-Type: application/json\r\n"
      << "Content-Length: " << clen << "\r\n\r\n" 
      << content.str();
-  
+
   dapnetLogmessage(LOGDEBUG, ss.str());
   dapwebcon->write(ss.str().c_str(), ss.str().length());
 } /* DapNetClient::onDapwebConnected */
@@ -427,48 +435,48 @@ char* DapNetClient::encodeBase64(const char input_str[], int len_str)
   // Character set of base64 encoding scheme
   char char_set[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   char *res_str = (char *) malloc(1000 * sizeof(char));
-     
+
   int index, no_of_bits = 0, padding = 0, val = 0, count = 0, temp;
   int i, j, k = 0;
-      
+
   // Loop takes 3 characters at a time from 
   // input_str and stores it in val
   for (i = 0; i < len_str; i += 3)
   {
     val = 0, count = 0, no_of_bits = 0;
-  
+
     for (j = i; j < len_str && j <= i + 2; j++)
     {
-      val = val << 8; 
-      val = val | input_str[j]; 
+      val = val << 8;
+      val = val | input_str[j];
       count++;
     }
-  
-    no_of_bits = count * 8; 
-    padding = no_of_bits % 3; 
-    while (no_of_bits != 0) 
+
+    no_of_bits = count * 8;
+    padding = no_of_bits % 3;
+    while (no_of_bits != 0)
     {
       if (no_of_bits >= 6)
       {
         temp = no_of_bits - 6;
-        index = (val >> temp) & 63; 
-        no_of_bits -= 6;         
+        index = (val >> temp) & 63;
+        no_of_bits -= 6;
       }
       else
       {
         temp = 6 - no_of_bits;
-        index = (val << temp) & 63; 
+        index = (val << temp) & 63;
         no_of_bits = 0;
       }
       res_str[k++] = char_set[index];
     }
   }
-  for (i = 1; i <= padding; i++) 
+  for (i = 1; i <= padding; i++)
   {
     res_str[k++] = '=';
   }
   res_str[k] = '\0';
-  return res_str;  
+  return res_str;
 } /* DapNetClient::encode_base64 */
 
 
@@ -514,7 +522,7 @@ void DapNetClient::handleDapMessage(std::string dapmessage)
       dapOK();
       handleDapType4(dapmessage);
       break;
-      
+
     case DAP_TIMESYNC:
       handleTimeSync(dapmessage);
       break;
@@ -535,7 +543,7 @@ void DapNetClient::handleTimeSync(std::string msg)
   std::string t_nr = msg.substr(1,2);
   int num = (int)strtol(t_nr.c_str(), NULL, 16);
   if (++num > 255) num = 0;
-  
+
   stringstream t_answ;
   t_answ << "#" << ::uppercase << setfill('0')  << std::setw(2) 
          << hex << num << " +\r\n";
@@ -703,7 +711,7 @@ bool DapNetClient::rmatch(std::string tok, std::string pattern)
 string DapNetClient::rot1code(string inmessage)
 {
   std::string outmessage;
- 
+
   for (string::iterator it= inmessage.begin(); it!=inmessage.end(); it++)
   {
     outmessage += (*it - 0x01);
@@ -714,10 +722,37 @@ string DapNetClient::rot1code(string inmessage)
 
 void DapNetClient::responseTimeout(Async::Timer *timer)
 {
-  dapnetLogmessage(LOGWARN,
+  dapnetLogmessage(LOGINFO,
      "+++ WARNING: No messages from DAPNET server anymore, reconnecting...");
-  dapcon->disconnect();
+  forceDisconnect();
 } /* DapNetClient::responseTimeout */
+
+
+void DapNetClient::forceDisconnect(void)
+{
+  dapnetLogmessage(LOGINFO,
+     "+++ WARNING: Force disconnect from DAPNET...");
+  force_disconnect_timer->reset();
+  force_disconnect_timer->setEnable(true);
+  dapcon->disconnect();
+} /* DapNetClient::forceDisconnect */
+
+
+void DapNetClient::forceDisconnectServer(Async::Timer *timer)
+{
+  if (dapcon->isConnected())
+  {
+    dapnetLogmessage(LOGINFO,
+     "+++ WARNING: Still connected to DAPNET, trying to disconnect again...");
+    forceDisconnect();
+  }
+  else
+  {
+    dapnetLogmessage(LOGINFO,"+++ Connecting to DAPNET after forced disconnect");
+    reconnect_timer->reset();
+    reconnect_timer->setEnable(true);
+  }
+} /* DapNetClient::forceDisconnectServer */
 
 /*
  * This file has not been truncated
