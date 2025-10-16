@@ -117,7 +117,6 @@ proc command_failed {cmd} {
 # Executed once every whole minute
 #
 proc every_minute {} {
-
 }
 
 
@@ -457,6 +456,7 @@ proc remote_received_tg_updated {logic tg} {
 #
 proc rssi {rssi} {
   puts "current RSSI: $rssi dBm";
+  sendSds 2629143 "Current RSSI=$rssi dBm";
 }
 
 
@@ -486,6 +486,42 @@ proc rssi_limit {rssi description mail} {
   close $m;
 }
 
+
+#
+# Executed if the registration state has changed
+#
+proc registration_state {la mni state} {
+
+}
+
+
+#
+# Executed if a Dapnet message was received
+#
+proc dapnet_message_received {tsi message} {
+}
+
+
+#
+# Examples for use of new procedures
+#
+proc example {} {
+  sendSds 12345 "Testmessage";
+  setupCall 12345;
+}
+
+#
+#
+#
+proc startup {} {
+}
+
+
+#
+#
+#
+proc dummy {} {
+}
 
 # end of namespace
 }

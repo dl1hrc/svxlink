@@ -136,7 +136,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "03102025"
+#define TETRA_LOGIC_VERSION "16102025"
 
 /****************************************************************************
  *
@@ -226,6 +226,15 @@ TetraLogic::TetraLogic(void)
   qosTimer.expired.connect(mem_fun(*this, &TetraLogic::onQosTimeout));
   userRegTimer.expired.connect(mem_fun(*this, &TetraLogic::userRegTimeout));
 } /* TetraLogic::TetraLogic */
+
+
+TetraLogic::~TetraLogic(void)
+{
+  peiComTimer = 0;
+  peiActivityTimer = 0;
+  peiBreakCommandTimer = 0;
+  qosTimer = 0;
+} /* TetraLogic::~TetraLogic */
 
 
 bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
@@ -754,48 +763,13 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   rxValveSetOpen(true);
   setTxCtrlMode(Tx::TX_AUTO);
 
-  /** Event handler **/
-  string event_handler_str(SVX_SHARE_INSTALL_DIR);
-  event_handler_str += "/events.tcl";
-  cfg().getValue(name(), "EVENT_HANDLER", event_handler_str);
-
-  if (event_handler_str.empty())
-  {
-    log(LOGERROR,
-      "*** ERROR: Config variable " + name() + "/EVENT_HANDLER is not set.");
-    isok = false;
-  }
-
-  event_handler = new EventHandler(event_handler_str, name());
-  event_handler->getConfigValue.connect(sigc::mem_fun(*this,
-                &TetraLogic::getConfigValue));
-  event_handler->setVariable("logic_name", name());
-  event_handler->setVariable("logic_type", type());
-  event_handler->setVariable("active_module", "");
-  event_handler->setVariable("sds_pty_path", sds_pty_path);
- // event_handler->sendSds.connect(sigc::mem_fun(*this, &TetraLogic::sendSds));
-
-  std::string loaded_modules;
-  std::list<Module*> modules = Logic::moduleList();
-  std::list<Module*>::const_iterator mit;
-
-  for (mit=modules.begin(); mit!=modules.end(); mit++)
-  {
-    if (!loaded_modules.empty())
-    {
-      loaded_modules += " ";
-    }
-    loaded_modules += (*mit)->name();
-  }
-
-  event_handler->setVariable("loaded_modules", loaded_modules);
-  event_handler->processEvent("namespace eval " + name() + "::Logic {}");
-
-  if (!event_handler->initialize())
-  {
-    log(LOGERROR, "*** ERROR initializing event handler in TetraLogic.");
-    isok = false;
-  }
+  /** New Tetra event methods **/
+  Logic::logic_event_handler()->sendSds.connect(sigc::mem_fun(*this,
+                                     &TetraLogic::sendSds));
+  Logic::logic_event_handler()->setupCall.connect(sigc::mem_fun(*this,
+                                     &TetraLogic::setupCall));
+  Logic::logic_event_handler()->dummy.connect(sigc::mem_fun(*this,
+                                     &TetraLogic::dummy));
 
   processEvent("startup");
 
@@ -2510,6 +2484,11 @@ void TetraLogic::onDapnetMessage(string tsi, string message)
   t_sds.direction = OUTGOING;
   t_sds.type = TEXT;
   queueSds(t_sds);
+
+  stringstream ss;
+  ss << "dapnet_message_received " << tsi << " \"" << message << "\"";
+  processEvent(ss.str());
+
 } /* TetraLogic::onDapnetMessage */
 
 
@@ -2711,8 +2690,14 @@ void TetraLogic::handleCreg(std::string m_message)
   stringstream ss;
   ss << "Registration LA=" << reg_la << ", MNI=" <<
      reg_mni << ", state=" << RegStat[reg_state];
-
   log(LOGDEBUG, ss.str());
+
+  string s = "registration_state " + reg_la;
+  s += " ";
+  s += reg_mni;
+  s += " ";
+  s += reg_state;
+  processEvent(s);
 } /* TetraLogic::handleCreg */
 
 
@@ -2818,6 +2803,27 @@ void TetraLogic::checkUserReg(void)
 
 void TetraLogic::sendSds(const std::string& issi, const std::string& message)
 {
+  stringstream ss;
+  ss << "Sending Sds from Tcl to " << issi << ", message=" << message;
+  log(LOGINFO, ss.str());
+
+  Sds t_sds;
+  t_sds.direction = OUTGOING;
+  t_sds.tsi = issi;
+  t_sds.message = message;
+  t_sds.type = TEXT;
+  t_sds.remark = "by Tcl procedur sendSds";
+  queueSds(t_sds);
+} /* TetraLogic::sendSds */
+
+
+void TetraLogic::setupCall(const std::string& issi)
+{
+  stringstream ss;
+  ss << "Setup call from Tcl to " << issi;
+  log(LOGINFO, ss.str());
+
+  initGroupCall(atoi(issi.c_str()));
 
 } /* TetraLogic::sendSds */
 
@@ -2828,6 +2834,12 @@ bool TetraLogic::getConfigValue(const std::string& section,
 {
   return cfg().getValue(section, tag, value, true);
 } /* TetraLogic::getConfigValue */
+
+
+void TetraLogic::dummy(const std::string& info)
+{
+  cout << "Tetra-Logic::dummy: " << info << endl;
+} /* TetraLogic::dummy */
 
 
 std::string TetraLogic::jsonToString(Json::Value eventmessage)

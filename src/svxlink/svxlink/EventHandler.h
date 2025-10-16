@@ -275,6 +275,21 @@ class EventHandler : public sigc::trackable
     sigc::signal<bool(const std::string&,
                  const std::string&, std::string&)> getConfigValue;
 
+    /**
+     * @brief 	A signal that is emitted when a Sds si send
+     * @param 	ISSI       Destination id of the partner
+     * @param 	message    Message to send
+     */
+    sigc::signal<void(const std::string&, const std::string&)> sendSds;
+
+    /**
+     * @brief 	A signal that is emitted when a call is initiated
+     * @param 	ISSI       Destination id of the partner
+     */
+    sigc::signal<void(const std::string&)> setupCall;
+
+    sigc::signal<void(const std::string&)> dummy;
+
   protected:
 
   private:
@@ -303,6 +318,12 @@ class EventHandler : public sigc::trackable
     static int setConfigValueHandler(ClientData cdata, Tcl_Interp *irp,
                     int argc, const char *argv[]);
     static int genericCommandHandler(ClientData cdata, Tcl_Interp *irp,
+                    int argc, const char *argv[]);
+    static int sendSdsHandler(ClientData cdata, Tcl_Interp *irp,
+                    int argc, const char *argv[]);
+    static int setupCallHandler(ClientData cdata, Tcl_Interp *irp,
+                    int argc, const char *argv[]);
+    static int dummyHandler(ClientData cdata, Tcl_Interp *irp,
                     int argc, const char *argv[]);
 };  /* class EventHandler */
 

@@ -126,6 +126,9 @@ class TetraLogic : public Logic
      */
     TetraLogic(void);
 
+
+    ~TetraLogic(void);
+
     /**
      * @brief 	Initialize the Tetra logic core
      * @return	Returns \em true if the initialization was successful or else
@@ -141,7 +144,7 @@ class TetraLogic : public Logic
                                    const std::string& cmd);
 
   protected:
-    virtual ~TetraLogic(void) override  {};
+    //virtual ~TetraLogic(void) override  {};
     virtual void audioStreamStateChange(bool is_active, bool is_idle);
     virtual void squelchOpen(bool is_open);
     virtual void transmitterStateChange(bool is_transmitting);
@@ -369,7 +372,6 @@ class TetraLogic : public Logic
     std::string vendor;
     std::string model;
     int inactive_time;
-    EventHandler *event_handler;
 
     void initPei(void);
     void onCharactersReceived(char *buf, int count);
@@ -430,9 +432,11 @@ class TetraLogic : public Logic
     void checkUserReg(void);
     void registerUser(std::string tsi);
     void sendSds(const std::string& issi, const std::string& message);
+    void setupCall(const std::string& issi);
     bool getConfigValue(const std::string& section,
          const std::string& tag, std::string& value);
     std::string jsonToString(Json::Value eventmessage);
+    void dummy(const std::string& info);
 };  /* class TetraLogic */
 
 

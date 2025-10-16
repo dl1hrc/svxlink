@@ -154,6 +154,11 @@ EventHandler::EventHandler(const string& event_script, const string& logic_name)
                     this, NULL);
   Tcl_CreateCommand(interp, "setConfigValue", setConfigValueHandler,
                     this, NULL);
+  Tcl_CreateCommand(interp, "sendSds", sendSdsHandler,
+                    this, NULL);
+  Tcl_CreateCommand(interp, "setupCall", setupCallHandler,
+                    this, NULL);
+  Tcl_CreateCommand(interp, "dummy", dummyHandler, this, NULL);
 
   //setVariable("script_path", event_script);
 
@@ -528,6 +533,66 @@ int EventHandler::genericCommandHandler(ClientData cdata, Tcl_Interp *irp,
   }
   return TCL_OK;
 } /* EventHandler::genericCommandHandler */
+
+
+int EventHandler::sendSdsHandler(ClientData cdata, Tcl_Interp *irp,
+      	      	      	      int argc, const char *argv[])
+{
+  if (argc != 3)
+  {
+    static char msg[] = "Usage: sendSds <ISSI> \"<message>\"";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+
+  string issi = argv[1];
+  string message = argv[2];
+  cout << "SENDING SDS "<< issi << ", message=" << message << endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->sendSds(issi, message);
+
+  return TCL_OK;
+} /* EventHandler::sendSdsHandler */
+
+
+int EventHandler::setupCallHandler(ClientData cdata, Tcl_Interp *irp,
+      	      	      	      int argc, const char *argv[])
+{
+  if (argc != 2)
+  {
+    static char msg[] = "Usage: setupCall <ISSI>";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+
+  string issi = argv[1];
+
+  cout << "SETUP CALL to "<< issi << endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->setupCall(issi);
+
+  return TCL_OK;
+} /* EventHandler::setupCall */
+
+
+int EventHandler::dummyHandler(ClientData cdata, Tcl_Interp *irp,
+      	      	      	      int argc, const char *argv[])
+{
+  if (argc != 2)
+  {
+    static char msg[] = "Usage: dummy <message>";
+    Tcl_SetResult(irp, msg, TCL_STATIC);
+    return TCL_ERROR;
+  }
+
+  string info = argv[1];
+
+  cout << "dummyhandler, " << info << endl;
+  EventHandler *self = static_cast<EventHandler *>(cdata);
+  self->dummy(info);
+
+  return TCL_OK;
+} /* EventHandler::dummyHandler */
 
 
 /*

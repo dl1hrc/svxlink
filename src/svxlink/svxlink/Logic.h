@@ -213,6 +213,8 @@ class Logic : public LogicBase
 
     void processMacroCmd(const std::string &macro_cmd);
 
+    EventHandler *logic_event_handler(void) { return event_handler; }
+
   protected:
     /**
      * @brief 	Destructor
@@ -317,7 +319,6 @@ class Logic : public LogicBase
     bool getConfigValue(const std::string& section, const std::string& tag,
                         std::string& value);
     void signalLevelUpdated(float siglev);
-
 };  /* class Logic */
 
 
