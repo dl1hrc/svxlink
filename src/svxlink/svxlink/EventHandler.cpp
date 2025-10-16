@@ -547,7 +547,6 @@ int EventHandler::sendSdsHandler(ClientData cdata, Tcl_Interp *irp,
 
   string issi = argv[1];
   string message = argv[2];
-  cout << "SENDING SDS "<< issi << ", message=" << message << endl;
   EventHandler *self = static_cast<EventHandler *>(cdata);
   self->sendSds(issi, message);
 
@@ -566,8 +565,6 @@ int EventHandler::setupCallHandler(ClientData cdata, Tcl_Interp *irp,
   }
 
   string issi = argv[1];
-
-  cout << "SETUP CALL to "<< issi << endl;
   EventHandler *self = static_cast<EventHandler *>(cdata);
   self->setupCall(issi);
 
@@ -587,7 +584,6 @@ int EventHandler::dummyHandler(ClientData cdata, Tcl_Interp *irp,
 
   string info = argv[1];
 
-  cout << "dummyhandler, " << info << endl;
   EventHandler *self = static_cast<EventHandler *>(cdata);
   self->dummy(info);
 
