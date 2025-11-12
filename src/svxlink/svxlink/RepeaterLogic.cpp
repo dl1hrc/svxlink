@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -144,8 +144,8 @@ RepeaterLogic::RepeaterLogic(void)
     open_sql_flank(SQL_FLANK_CLOSE),
     short_sql_open_cnt(0), sql_flap_sup_min_time(1000),
     sql_flap_sup_max_cnt(0), rgr_enable(true), open_reason("?"),
-    ident_nag_min_time(2000), ident_nag_timer(-1), delayed_tg_activation(0),
-    open_on_ctcss_timer(-1)
+    ident_nag_min_time(2000), ident_nag_timer(-1),
+    delayed_tg_activation(TG_RESET), open_on_ctcss_timer(-1)
 {
   up_timer.expired.connect(mem_fun(*this, &RepeaterLogic::idleTimeout));
   open_on_sql_timer.expired.connect(
@@ -278,33 +278,20 @@ bool RepeaterLogic::initialize(Async::Config& cfgobj, const std::string& logic_n
   {
     idle_sound_timer.setTimeout(idle_sound_interval);
   }
-  
-  if (cfg().getValue(name(), "NO_REPEAT", str))
-  {
-    no_repeat = atoi(str.c_str()) != 0;
-  }
-  
-  if (cfg().getValue(name(), "SQL_FLAP_SUP_MIN_TIME", str))
-  {
-    sql_flap_sup_min_time = atoi(str.c_str());
-  }
-  
-  if (cfg().getValue(name(), "SQL_FLAP_SUP_MAX_COUNT", str))
-  {
-    sql_flap_sup_max_cnt = atoi(str.c_str());
-  }
-  
+
+  cfg().getValue(name(), "NO_REPEAT", no_repeat);
+  cfg().getValue(name(), "SQL_FLAP_SUP_MIN_TIME", sql_flap_sup_min_time);
+  cfg().getValue(name(), "SQL_FLAP_SUP_MAX_COUNT", sql_flap_sup_max_cnt);
+
   int ident_nag_timeout;
   if (cfg().getValue(name(), "IDENT_NAG_TIMEOUT", ident_nag_timeout))
   {
     ident_nag_timer.setTimeout(1000 * ident_nag_timeout);
   }
-  
-  if (cfg().getValue(name(), "IDENT_NAG_MIN_TIME", str))
-  {
-    ident_nag_min_time = atoi(str.c_str());
-  }
-  
+
+  cfg().getValue(name(), "IDENT_NAG_MIN_TIME", ident_nag_min_time);
+  cfg().getValue(name(), "DTMF_IGNORE_WHEN_NOT_UP", m_dtmf_ignore_when_not_up);
+
   rx().toneDetected.connect(mem_fun(*this, &RepeaterLogic::detectedTone));
   
   if (required_1750_duration > 0)
@@ -394,7 +381,7 @@ void RepeaterLogic::dtmfDigitDetected(char digit, int duration)
       open_reason = "DTMF";
       activateOnOpenOrClose(SQL_FLANK_CLOSE);
     }
-    else
+    else if (m_dtmf_ignore_when_not_up)
     {
       cout << name() << ": Ignoring DTMF digit \"" << digit
            << "\" since the repeater is not up\n";
@@ -485,8 +472,8 @@ void RepeaterLogic::setReceivedTg(uint32_t tg)
   }
   else
   {
-    //std::cout << "### RepeaterLogic::setReceivedTg: Delayed TG activation"
-    //          << std::endl;
+    //std::cout << "### RepeaterLogic::setReceivedTg: Delayed TG activation tg="
+    //          << tg << std::endl;
     delayed_tg_activation = tg;
   }
 } /* RepeaterLogic::setReceivedTg */
@@ -577,10 +564,10 @@ void RepeaterLogic::setUp(bool up, string reason)
       ident_nag_timer.setEnable(true);
     }
 
-    if (delayed_tg_activation > 0)
+    if (delayed_tg_activation != TG_RESET)
     {
       Logic::setReceivedTg(delayed_tg_activation);
-      delayed_tg_activation = 0;
+      delayed_tg_activation = TG_RESET;
     }
   }
   else
@@ -694,7 +681,7 @@ void RepeaterLogic::squelchOpen(bool is_open)
         //Logic::setReceivedTg(delayed_tg_activation);
         Logic::squelchOpen(false);
       }
-      delayed_tg_activation = 0;
+      delayed_tg_activation = TG_RESET;
     }
   }
 } /* RepeaterLogic::squelchOpen */

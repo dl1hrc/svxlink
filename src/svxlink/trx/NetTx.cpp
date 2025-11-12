@@ -311,9 +311,10 @@ void NetTx::connectionReady(bool is_ready)
 {
   if (is_ready)
   {
-    cout << name() << ": Connected to remote transmitter at "
-        << tcp_con->remoteHost() << ":" << tcp_con->remotePort() << "\n";
-    
+    std::cout << "NOTICE[" << name() << "]: Connected to remote transmitter at "
+              << tcp_con->remoteHost() << ":" << tcp_con->remotePort()
+              << std::endl;
+
     is_connected = true;
     log_disconnect = true;
     
@@ -357,10 +358,12 @@ void NetTx::connectionReady(bool is_ready)
   {
     if (log_disconnect)
     {
-      cout << name() << ": Disconnected from remote transmitter at "
-          << tcp_con->remoteHost() << ":" << tcp_con->remotePort() << ": "
-          << TcpConnection::disconnectReasonStr(tcp_con->disconnectReason())
-          << "\n";
+      const auto& disc_reason = tcp_con->disconnectReason();
+      std::cout << "*** ERROR[" << name()
+                << "]: Disconnected from remote transmitter at "
+                << tcp_con->remoteHost() << ":" << tcp_con->remotePort() << ": "
+                << TcpConnection::disconnectReasonStr(disc_reason)
+                << std::endl;
     }
     
     is_connected = false;

@@ -75,6 +75,7 @@ using namespace SvxLink;
  *
  ****************************************************************************/
 
+ #define GPSD_VERSION "12112025"
 
 
 /****************************************************************************
@@ -197,7 +198,7 @@ int GpsdTcpClient::tcpDataReceived(TcpClient<>::TcpConnection *con,
   {
     "class":"POLL",
     "time":"2021-09-02T11:20:23.008Z",
-    "active":1, 
+    "active":1,
     "tpv":[{"class":"TPV","device":"/dev/ttyACM0",
     "mode":3,
     "time":"2021-09-02T11:20:22.000Z",
@@ -266,7 +267,7 @@ int GpsdTcpClient::tcpDataReceived(TcpClient<>::TcpConnection *con,
     }
   }
 
-  // mode: 0==unknown, 1==no fix, 2==2D, 3==3D 
+  // mode: 0==unknown, 1==no fix, 2==2D, 3==3D
   if (mode == 2 || mode == 3)
   {
     gpsdDataReceived(pos);

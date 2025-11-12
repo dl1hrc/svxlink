@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -273,12 +273,13 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     return false;
   }
 
-  string event_handler_str;
-  if (!cfg().getValue(name(), "EVENT_HANDLER", event_handler_str) ||
-      event_handler_str.empty())
+  std::string event_handler_str(SVX_SHARE_INSTALL_DIR);
+  event_handler_str += "/events.tcl";
+  cfg().getValue(name(), "EVENT_HANDLER", event_handler_str);
+  if (event_handler_str.empty())
   {
     std::cerr << "*** ERROR: Config variable " << name()
-              << "/EVENT_HANDLER not set or empty" << std::endl;
+              << "/EVENT_HANDLER empty" << std::endl;
     return false;
   }
 
@@ -395,16 +396,20 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     m_event_handler->playDtmf.connect(
           sigc::mem_fun(*this, &ReflectorLogic::handlePlayDtmf));
   }
+  m_event_handler->getConfigValue.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::getConfigValue));
   m_event_handler->setConfigValue.connect(
       sigc::mem_fun(cfg(), &Async::Config::setValue<std::string>));
-  m_event_handler->setVariable("logic_name", name().c_str());
+  m_event_handler->setVariable("logic_name", name());
+  m_event_handler->setVariable("logic_type", type());
 
-  m_event_handler->processEvent("namespace eval Logic {}");
+  m_event_handler->processEvent(
+      std::string("namespace eval ") + name() + "::Logic {}");
   list<string> cfgvars = cfg().listSection(name());
   list<string>::const_iterator cfgit;
   for (cfgit=cfgvars.begin(); cfgit!=cfgvars.end(); ++cfgit)
   {
-    string var = "Logic::CFG_" + *cfgit;
+    string var = name() + "::Logic::CFG_" + *cfgit;
     string value;
     cfg().getValue(name(), *cfgit, value);
     m_event_handler->setVariable(var, value);
@@ -631,6 +636,11 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
   //     << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
 
+  if (m_con_state != STATE_CONNECTED)
+  {
+    return;
+  }
+
   if (event_name == "Voter:sql_state")
   {
     //MsgUdpSignalStrengthValues msg;
@@ -774,7 +784,7 @@ ReflectorLogic::~ReflectorLogic(void)
 
 void ReflectorLogic::onConnected(void)
 {
-  std::cout << name() << ": Connection established to "
+  std::cout << "NOTICE: " << name() << ": Connection established to "
             << m_con.remoteHost() << ":" << m_con.remotePort()
             << " (" << (m_con.isPrimary() ? "primary" : "secondary") << ")"
             << std::endl;
@@ -833,13 +843,13 @@ void ReflectorLogic::onFrameReceived(FramedTcpConnection *con,
   ReflectorMsg header;
   if (!header.unpack(ss))
   {
-    cerr << "*** ERROR[" << name()
-         << "]: Unpacking failed for TCP message header\n";
+    std::cerr << "*** ERROR[" << name()
+              << "]: Unpacking failed for TCP message header" << std::endl;
     disconnect();
     return;
   }
 
-  if ((header.type() > 100) && !isLoggedIn())
+  if ((header.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
   {
     cerr << "*** ERROR[" << name() << "]: Unexpected protocol message received"
          << endl;
@@ -918,7 +928,8 @@ void ReflectorLogic::handleMsgProtoVerDowngrade(std::istream& is)
   MsgProtoVerDowngrade msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgProtoVerDowngrade" << endl;
+    std::cerr << "*** ERROR[" << name()
+              << "]: Could not unpack MsgProtoVerDowngrade" << std::endl;
     disconnect();
     return;
   }
@@ -934,7 +945,8 @@ void ReflectorLogic::handleMsgAuthChallenge(std::istream& is)
 {
   if (m_con_state != STATE_EXPECT_AUTH_CHALLENGE)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthChallenge\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthChallenge"
+              << std::endl;
     disconnect();
     return;
   }
@@ -942,14 +954,16 @@ void ReflectorLogic::handleMsgAuthChallenge(std::istream& is)
   MsgAuthChallenge msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgAuthChallenge\n";
+    std::cerr << "*** ERROR[" << name()
+              << "]: Could not unpack MsgAuthChallenge" << std::endl;
     disconnect();
     return;
   }
   const uint8_t *challenge = msg.challenge();
   if (challenge == 0)
   {
-    cerr << "*** ERROR[" << name() << "]: Illegal challenge received\n";
+    std::cerr << "*** ERROR[" << name() << "]: Illegal challenge received"
+              << std::endl;
     disconnect();
     return;
   }
@@ -962,7 +976,8 @@ void ReflectorLogic::handleMsgAuthOk(void)
 {
   if (m_con_state != STATE_EXPECT_AUTH_OK)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthOk\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthOk"
+              << std::endl;
     disconnect();
     return;
   }
@@ -976,14 +991,16 @@ void ReflectorLogic::handleMsgServerInfo(std::istream& is)
 {
   if (m_con_state != STATE_EXPECT_SERVER_INFO)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgServerInfo\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgServerInfo"
+              << std::endl;
     disconnect();
     return;
   }
   MsgServerInfo msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgServerInfo\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgServerInfo"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1118,7 +1135,8 @@ void ReflectorLogic::handleMsgNodeList(std::istream& is)
   MsgNodeList msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeList\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeList"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1142,7 +1160,8 @@ void ReflectorLogic::handleMsgNodeJoined(std::istream& is)
   MsgNodeJoined msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeJoined\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeJoined"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1158,7 +1177,8 @@ void ReflectorLogic::handleMsgNodeLeft(std::istream& is)
   MsgNodeLeft msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeLeft\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeLeft"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1174,7 +1194,8 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   MsgTalkerStart msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStart\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStart"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1217,7 +1238,8 @@ void ReflectorLogic::handleMsgTalkerStop(std::istream& is)
   MsgTalkerStop msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStop\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStop"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1235,7 +1257,8 @@ void ReflectorLogic::handleMsgRequestQsy(std::istream& is)
   MsgRequestQsy msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgRequestQsy\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgRequestQsy"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1276,6 +1299,14 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   {
     return;
   }
+  if ((msg.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
+  {
+    std::cerr << "### " << name()
+         << ": Trying to send user message " << msg.type()
+         << " in unauthenticated state"
+         << std::endl;
+    return;
+  }
 
   m_tcp_heartbeat_tx_cnt = TCP_HEARTBEAT_TX_CNT_RESET;
 
@@ -1283,8 +1314,8 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   ReflectorMsg header(msg.type());
   if (!header.pack(ss) || !msg.pack(ss))
   {
-    cerr << "*** ERROR[" << name()
-         << "]: Failed to pack reflector TCP message\n";
+    std::cerr << "*** ERROR[" << name()
+              << "]: Failed to pack reflector TCP message" << std::endl;
     disconnect();
     return;
   }
@@ -1395,7 +1426,8 @@ void ReflectorLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
       MsgUdpAudio msg;
       if (!msg.unpack(ss))
       {
-        cerr << "*** WARNING[" << name() << "]: Could not unpack MsgUdpAudio\n";
+        std::cerr << "*** WARNING[" << name()
+                  << "]: Could not unpack MsgUdpAudio" << std::endl;
         return;
       }
       if (!msg.audioData().empty())
@@ -1446,8 +1478,8 @@ void ReflectorLogic::sendUdpMsg(const ReflectorUdpMsg& msg)
   ostringstream ss;
   if (!header.pack(ss) || !msg.pack(ss))
   {
-    cerr << "*** ERROR[" << name()
-         << "]: Failed to pack reflector TCP message\n";
+    std::cerr << "*** ERROR[" << name()
+              << "]: Failed to pack reflector TCP message" << std::endl;
     return;
   }
   m_udp_sock->write(m_con.remoteHost(), m_con.remotePort(),
@@ -1864,6 +1896,14 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
   setIdle(false);
   LinkManager::instance()->playDtmf(this, digit, amp, duration);
 } /* ReflectorLogic::handlePlayDtmf */
+
+
+bool ReflectorLogic::getConfigValue(const std::string& section,
+                                    const std::string& tag,
+                                    std::string& value)
+{
+  return cfg().getValue(section, tag, value, true);
+} /* ReflectorLogic::getConfigValue */
 
 
 /*

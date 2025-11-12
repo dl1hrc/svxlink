@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <unistd.h>
+#include <sys/utsname.h>
 
 #include <sstream>
 #include <iostream>
@@ -224,8 +225,8 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
 {
     // Must create logic connection objects before calling LogicBase::initialize
   m_logic_con_in = new Async::AudioStreamStateDetector;
-  m_logic_con_in->sigStreamStateChanged.connect(
-      sigc::mem_fun(*this, &ReflectorLogic::onLogicConInStreamStateChanged));
+  m_logic_con_in->sigStreamIsIdle.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::onLogicConInStreamIsIdle));
   m_logic_con_out = new Async::AudioStreamStateDetector;
   m_logic_con_out->sigStreamStateChanged.connect(
       sigc::mem_fun(*this, &ReflectorLogic::onLogicConOutStreamStateChanged));
@@ -427,7 +428,7 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   if (!loadClientCertificate())
   {
     std::cerr << "*** WARNING[" << name() << "]: Failed to load client "
-                 "certificate. Ifnoring on-disk stored certificate file '"
+                 "certificate. Ignoring on-disk stored certificate file '"
               << m_crtfile << "'." << std::endl;
   }
 
@@ -453,12 +454,13 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     }
   }
 
-  string event_handler_str;
-  if (!cfg().getValue(name(), "EVENT_HANDLER", event_handler_str) ||
-      event_handler_str.empty())
+  std::string event_handler_str(SVX_SHARE_INSTALL_DIR);
+  event_handler_str += "/events.tcl";
+  cfg().getValue(name(), "EVENT_HANDLER", event_handler_str);
+  if (event_handler_str.empty())
   {
     std::cerr << "*** ERROR: Config variable " << name()
-              << "/EVENT_HANDLER not set or empty" << std::endl;
+              << "/EVENT_HANDLER empty" << std::endl;
     return false;
   }
 
@@ -535,6 +537,7 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   prev_src = 0;
 
   cfg().getValue(name(), "DEFAULT_TG", m_default_tg);
+
   if (!cfg().getValue(name(), "TG_SELECT_TIMEOUT", 1U,
                       std::numeric_limits<unsigned>::max(),
                       m_tg_select_timeout, true))
@@ -545,7 +548,7 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     return false;
   }
 
-  m_tg_select_inhibit_timeout = m_tg_select_timeout;
+  m_tg_select_inhibit_timeout = (m_default_tg == 0) ? m_tg_select_timeout : 0;
   if (!cfg().getValue(name(), "TG_SELECT_INHIBIT_TIMEOUT", 0U,
                       std::numeric_limits<unsigned>::max(),
                       m_tg_select_inhibit_timeout, true))
@@ -575,16 +578,20 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     m_event_handler->playDtmf.connect(
           sigc::mem_fun(*this, &ReflectorLogic::handlePlayDtmf));
   }
+  m_event_handler->getConfigValue.connect(
+      sigc::mem_fun(*this, &ReflectorLogic::getConfigValue));
   m_event_handler->setConfigValue.connect(
       sigc::mem_fun(cfg(), &Async::Config::setValue<std::string>));
-  m_event_handler->setVariable("logic_name", name().c_str());
+  m_event_handler->setVariable("logic_name", name());
+  m_event_handler->setVariable("logic_type", type());
 
-  m_event_handler->processEvent("namespace eval Logic {}");
+  m_event_handler->processEvent(
+      std::string("namespace eval ") + name() + "::Logic {}");
   list<string> cfgvars = cfg().listSection(name());
   list<string>::const_iterator cfgit;
   for (cfgit=cfgvars.begin(); cfgit!=cfgvars.end(); ++cfgit)
   {
-    string var = "Logic::CFG_" + *cfgit;
+    string var = name() + "::Logic::CFG_" + *cfgit;
     string value;
     cfg().getValue(name(), *cfgit, value);
     m_event_handler->setVariable(var, value);
@@ -633,6 +640,12 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   m_node_info["sw"] = "SvxLink";
   m_node_info["swVer"] = SVXLINK_APP_VERSION;
   m_node_info["projVer"] = PROJECT_VERSION;
+
+  struct utsname osInfo{};
+  if (uname(&osInfo) == 0)
+  {
+    m_node_info["machineArch"] = osInfo.machine;
+  }
 
   cfg().getValue(name(), "UDP_HEARTBEAT_INTERVAL",
       m_udp_heartbeat_tx_cnt_reset);
@@ -789,12 +802,23 @@ void ReflectorLogic::remoteCmdReceived(LogicBase* src_logic,
 
 void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 {
-  //cout << "### ReflectorLogic::remoteReceivedTgUpdated: logic="
-  //     << logic->name() << "  tg=" << tg
-  //     << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc << endl;
-  if ((m_selected_tg == 0) && (tg > 0))
+  //std::cout << "### ReflectorLogic::remoteReceivedTgUpdated: logic="
+  //          << logic->name() << "  tg=" << tg
+  //          << "  m_mute_first_tx_loc=" << m_mute_first_tx_loc
+  //          << "  m_tg_select_timeout_cnt=" << m_tg_select_timeout_cnt
+  //          << std::endl;
+  if ((m_selected_tg == 0) && (m_tg_select_timeout_cnt == 0))
   {
-    selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
+    if (tg > 0)
+    {
+      selectTg(tg, "tg_local_activation", !m_mute_first_tx_loc);
+    }
+    else
+    {
+      std::cout << name() << ": Inhibit TG activation" << std::endl;
+      selectTg(tg, "tg_inhibit_activation", false);
+      m_tg_select_timeout_cnt = m_tg_select_inhibit_timeout;
+    }
     m_tg_local_activity = !m_mute_first_tx_loc;
     m_use_prio = false;
   }
@@ -810,6 +834,11 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
   //     << " data=" << data
   //     << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
+
+  if (m_con_state != STATE_CONNECTED)
+  {
+    return;
+  }
 
   if (event_name == "Voter:sql_state")
   {
@@ -954,7 +983,7 @@ ReflectorLogic::~ReflectorLogic(void)
 
 void ReflectorLogic::onConnected(void)
 {
-  std::cout << name() << ": Connection established to "
+  std::cout << "NOTICE[" << name() << "]: Connected to "
             << m_con.remoteHost() << ":" << m_con.remotePort()
             << " (" << (m_con.isPrimary() ? "primary" : "secondary") << ")"
             << std::endl;
@@ -971,7 +1000,7 @@ void ReflectorLogic::onConnected(void)
   //m_con.setMaxFrameSize(ReflectorMsg::MAX_SSL_SETUP_FRAME_SIZE);
   m_con_state = STATE_EXPECT_CA_INFO;
   //m_con.setMaxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_FRAME_SIZE);
-  processEvent("reflector_connection_status_update 1");
+  //processEvent("reflector_connection_status_update 1");
 } /* ReflectorLogic::onConnected */
 
 
@@ -1100,10 +1129,11 @@ void ReflectorLogic::onFrameReceived(FramedTcpConnection*,
     return;
   }
 
-  if ((header.type() > 100) && !isTcpLoggedIn())
+  if ((header.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected protocol message received"
-         << endl;
+    std::cerr << "*** ERROR[" << name()
+              << "]: Unexpected protocol message received with type="
+              << header.type() << std::endl;
     disconnect();
     return;
   }
@@ -1232,7 +1262,8 @@ void ReflectorLogic::handleMsgAuthChallenge(std::istream& is)
       (m_con_state != STATE_EXPECT_CERT) &&
       (m_con_state != STATE_EXPECT_AUTH_RESPONSE) */)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthChallenge\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthChallenge"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1248,7 +1279,8 @@ void ReflectorLogic::handleMsgAuthChallenge(std::istream& is)
   const uint8_t *challenge = msg.challenge();
   if (challenge == 0)
   {
-    cerr << "*** ERROR[" << name() << "]: Illegal challenge received\n";
+    std::cerr << "*** ERROR[" << name() << "]: Illegal challenge received"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1264,7 +1296,8 @@ void ReflectorLogic::handleMsgAuthOk(void)
 {
   if (m_con_state != STATE_EXPECT_AUTH_ANSWER)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthOk\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgAuthOk"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1508,7 +1541,8 @@ void ReflectorLogic::handleMsgClientCert(std::istream& is)
   MsgClientCert msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgClientCert\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgClientCert"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1588,14 +1622,16 @@ void ReflectorLogic::handleMsgServerInfo(std::istream& is)
 {
   if (m_con_state != STATE_EXPECT_SERVER_INFO)
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected MsgServerInfo\n";
+    std::cerr << "*** ERROR[" << name() << "]: Unexpected MsgServerInfo"
+              << std::endl;
     disconnect();
     return;
   }
   MsgServerInfo msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgServerInfo\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgServerInfo"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1784,7 +1820,8 @@ void ReflectorLogic::handleMsgNodeList(std::istream& is)
   MsgNodeList msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeList\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeList"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1808,7 +1845,8 @@ void ReflectorLogic::handleMsgNodeJoined(std::istream& is)
   MsgNodeJoined msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeJoined\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeJoined"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1824,7 +1862,8 @@ void ReflectorLogic::handleMsgNodeLeft(std::istream& is)
   MsgNodeLeft msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeLeft\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgNodeLeft"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1840,7 +1879,8 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   MsgTalkerStart msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStart\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStart"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1883,7 +1923,8 @@ void ReflectorLogic::handleMsgTalkerStop(std::istream& is)
   MsgTalkerStop msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStop\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgTalkerStop"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1901,7 +1942,8 @@ void ReflectorLogic::handleMsgRequestQsy(std::istream& is)
   MsgRequestQsy msg;
   if (!msg.unpack(is))
   {
-    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgRequestQsy\n";
+    std::cerr << "*** ERROR[" << name() << "]: Could not unpack MsgRequestQsy"
+              << std::endl;
     disconnect();
     return;
   }
@@ -1967,6 +2009,14 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   {
     return;
   }
+  if ((msg.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
+  {
+    std::cerr << "### " << name()
+         << ": Trying to send user message " << msg.type()
+         << " in unauthenticated state"
+         << std::endl;
+    return;
+  }
 
   m_tcp_heartbeat_tx_cnt = TCP_HEARTBEAT_TX_CNT_RESET;
 
@@ -1974,8 +2024,8 @@ void ReflectorLogic::sendMsg(const ReflectorMsg& msg)
   ReflectorMsg header(msg.type());
   if (!header.pack(ss) || !msg.pack(ss))
   {
-    cerr << "*** ERROR[" << name()
-         << "]: Failed to pack reflector TCP message\n";
+    std::cerr << "*** ERROR[" << name()
+              << "]: Failed to pack reflector TCP message" << std::endl;
     disconnect();
     return;
   }
@@ -2021,8 +2071,8 @@ bool ReflectorLogic::udpCipherDataReceived(const IpAddress& addr, uint16_t port,
 {
   if (static_cast<size_t>(count) < UdpCipher::AADLEN)
   {
-    std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
-                 "short to hold associated data" << std::endl;
+    //std::cout << "### ReflectorLogic::udpCipherDataReceived: Datagram too "
+    //             "short to hold associated data" << std::endl;
     return true;
   }
   stringstream ss;
@@ -2044,7 +2094,7 @@ bool ReflectorLogic::udpCipherDataReceived(const IpAddress& addr, uint16_t port,
 void ReflectorLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
                                          void* aad, void *buf, int count)
 {
-  if (!isTcpLoggedIn())
+  if (m_con_state < STATE_EXPECT_START_UDP_ENCRYPTION)
   {
     return;
   }
@@ -2116,6 +2166,7 @@ void ReflectorLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
               << std::endl;
     m_con.markAsEstablished();
     m_con_state = STATE_CONNECTED;
+    processEvent("reflector_connection_status_update 1");
 
     if (m_selected_tg > 0)
     {
@@ -2145,7 +2196,8 @@ void ReflectorLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
       MsgUdpAudio msg;
       if (!msg.unpack(ss))
       {
-        cerr << "*** WARNING[" << name() << "]: Could not unpack MsgUdpAudio\n";
+        std::cerr << "*** WARNING[" << name()
+                  << "]: Could not unpack MsgUdpAudio" << std::endl;
         return;
       }
       if (!msg.audioData().empty())
@@ -2407,11 +2459,10 @@ bool ReflectorLogic::codecIsAvailable(const std::string &codec_name)
 } /* ReflectorLogic::codecIsAvailable */
 
 
-void ReflectorLogic::onLogicConInStreamStateChanged(bool is_active,
-                                                    bool is_idle)
+void ReflectorLogic::onLogicConInStreamIsIdle(bool is_idle)
 {
-  //cout << "### ReflectorLogic::onLogicConInStreamStateChanged: is_active="
-  //     << is_active << "  is_idle=" << is_idle << endl;
+  //std::cout << "### ReflectorLogic::onLogicConInStreamIsIdle: "
+  //          << "is_idle=" << is_idle << std::endl;
   if (is_idle)
   {
     if (m_qsy_pending_timer.isEnabled())
@@ -2441,8 +2492,14 @@ void ReflectorLogic::onLogicConInStreamStateChanged(bool is_active,
     m_qsy_pending_timer.reset();
     m_tg_local_activity = true;
     m_use_prio = false;
-    m_tg_select_timeout_cnt =
-      (m_selected_tg > 0) ? m_tg_select_timeout : m_tg_select_inhibit_timeout;
+    if (m_selected_tg > 0)
+    {
+      m_tg_select_timeout_cnt = m_tg_select_timeout;
+    }
+    else if (m_tg_select_timeout_cnt > 0)
+    {
+      m_tg_select_timeout_cnt = m_tg_select_inhibit_timeout;
+    }
   }
 
   if (!m_tg_selection_event.empty())
@@ -2453,7 +2510,11 @@ void ReflectorLogic::onLogicConInStreamStateChanged(bool is_active,
   }
 
   checkIdle();
-} /* ReflectorLogic::onLogicConInStreamStateChanged */
+
+  std::ostringstream ss;
+  ss << "local_talker_" << (is_idle ? "stop" : "start");
+  processEvent(ss.str());
+} /* ReflectorLogic::onLogicConInStreamIsIdle */
 
 
 void ReflectorLogic::onLogicConOutStreamStateChanged(bool is_active,
@@ -2487,6 +2548,10 @@ void ReflectorLogic::tgSelectTimerExpired(void)
         (--m_tg_select_timeout_cnt == 0))
     {
       selectTg(0, "tg_selection_timeout", false);
+      if (m_selected_tg == 0)
+      {
+        std::cout << name() << ": TG activation normal" << std::endl;
+      }
     }
   }
 } /* ReflectorLogic::tgSelectTimerExpired */
@@ -2494,8 +2559,6 @@ void ReflectorLogic::tgSelectTimerExpired(void)
 
 void ReflectorLogic::selectTg(uint32_t tg, const std::string& event, bool unmute)
 {
-  cout << name() << ": Selecting TG #" << tg << endl;
-
   m_tg_selection_event.clear();
   if (!event.empty())
   {
@@ -2508,6 +2571,8 @@ void ReflectorLogic::selectTg(uint32_t tg, const std::string& event, bool unmute
 
   if (tg != m_selected_tg)
   {
+    std::cout << name() << ": Selecting TG #" << tg << std::endl;
+
     sendMsg(MsgSelectTG(tg));
     if (m_selected_tg != 0)
     {
@@ -2644,6 +2709,14 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
   setIdle(false);
   LinkManager::instance()->playDtmf(this, digit, amp, duration);
 } /* ReflectorLogic::handlePlayDtmf */
+
+
+bool ReflectorLogic::getConfigValue(const std::string& section,
+                                    const std::string& tag,
+                                    std::string& value)
+{
+  return cfg().getValue(section, tag, value, true);
+} /* ReflectorLogic::getConfigValue */
 
 
 bool ReflectorLogic::loadClientCertificate(void)

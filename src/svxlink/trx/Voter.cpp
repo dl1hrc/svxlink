@@ -118,15 +118,16 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
       if (rx != 0)
       {
         mute_state = rx->muteState();
-	rx->dtmfDigitDetected.connect(
-		mem_fun(*this, &SatRx::onDtmfDigitDetected));
-	rx->selcallSequenceDetected.connect(
-		mem_fun(*this, &SatRx::onSelcallSequenceDetected));
-	rx->squelchOpen.connect(
-		mem_fun(*this, &SatRx::rxSquelchOpen));
-	rx->signalLevelUpdated.connect(
-		mem_fun(*this, &SatRx::rxSignalLevelUpdated));
-        rx->toneDetected.connect(toneDetected.make_slot());
+        rx->dtmfDigitDetected.connect(
+                sigc::mem_fun(*this, &SatRx::onDtmfDigitDetected));
+        rx->selcallSequenceDetected.connect(
+                sigc::mem_fun(*this, &SatRx::onSelcallSequenceDetected));
+        rx->squelchOpen.connect(
+                sigc::mem_fun(*this, &SatRx::rxSquelchOpen));
+        rx->signalLevelUpdated.connect(
+                sigc::mem_fun(*this, &SatRx::rxSignalLevelUpdated));
+        rx->toneDetected.connect(
+                sigc::mem_fun(*this, &SatRx::onToneDetected));
 
         // FIXME: We should take care of publishStateEvent
 
@@ -224,6 +225,12 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
       valve.setOpen(!do_stop);
       if (!do_stop)
       {
+        if (tone_detected >= 0.0f)
+        {
+          toneDetected(tone_detected);
+          tone_detected = -1.0f;
+        }
+
       	DtmfBuf::iterator dit;
       	for (dit=dtmf_buf.begin(); dit!=dtmf_buf.end(); ++dit)
 	{
@@ -247,14 +254,13 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
       sql_open_delay = new_sql_open_delay;
     }
     unsigned sqlOpenDelay(void) const { return sql_open_delay; }
-    
-    signal<void, char, int>  	dtmfDigitDetected;
-    signal<void, string>  	selcallSequenceDetected;
-    signal<void, bool, SatRx*> 	squelchOpen;
-    signal<void, float, SatRx*>	signalLevelUpdated;
-    signal<void, float>		toneDetected;
 
-    
+    sigc::signal<void(char, int)>     dtmfDigitDetected;
+    sigc::signal<void(string)>        selcallSequenceDetected;
+    sigc::signal<void(bool, SatRx*)>  squelchOpen;
+    sigc::signal<void(float, SatRx*)> signalLevelUpdated;
+    sigc::signal<void(float)>         toneDetected;
+
   protected:
     virtual void allSamplesFlushed(void)
     {
@@ -277,6 +283,7 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
     bool          enabled;
     Rx::MuteState mute_state;
     unsigned      sql_open_delay;
+    float         tone_detected   {-1.0};
     
     void onDtmfDigitDetected(char digit, int duration)
     {
@@ -301,7 +308,19 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
       	selcallSequenceDetected(sequence);
       }
     }
-    
+
+    void onToneDetected(float tone)
+    {
+      if (!valve.isOpen())
+      {
+        tone_detected = tone;
+      }
+      else
+      {
+        toneDetected(tone);
+      }
+    }
+
     void rxSquelchOpen(bool is_open)
     {
       if (is_open)
@@ -345,6 +364,7 @@ class Voter::SatRx : public AudioSource, public sigc::trackable
         }
         dtmf_buf.clear();
         selcall_buf.clear();
+        tone_detected = -1.0f;
       }
     }
 };
@@ -861,12 +881,12 @@ void Voter::Top::satSignalLevelUpdated(SatRx *srx, float siglev)
 
   if (srx == activeSrx())
   {
-    runTask(bind(voter().signalLevelUpdated.make_slot(), siglev));
+    runTask(sigc::bind(voter().signalLevelUpdated.make_slot(), siglev));
   }
 } /* Voter::Top::satSignalLevelUpdated */
 
 
-void Voter::Top::runTask(sigc::slot<void> task)
+void Voter::Top::runTask(sigc::slot<void()> task)
 {
   Async::Application::app().runTask(task);
 } /* Voter::Top::runTask */
@@ -1045,7 +1065,7 @@ void Voter::ActiveRxSelected::init(SatRx *srx)
 
 void Voter::ActiveRxSelected::exit(void)
 {
-  runTask(bind(mem_fun(activeSrx(), &SatRx::stopOutput), true));  
+  runTask(sigc::bind(sigc::mem_fun(*activeSrx(), &SatRx::stopOutput), true));
 } /* Voter::ActiveRxSelected::exit */
 
 
@@ -1097,7 +1117,7 @@ void Voter::SquelchOpen::entry(void)
   }
 
   runTask(bind(mem_fun(voter(), &Voter::setSquelchState), true, ss.str()));
-  runTask(bind(mem_fun(activeSrx(), &SatRx::stopOutput), false));
+  runTask(bind(mem_fun(*activeSrx(), &SatRx::stopOutput), false));
   //runTask(mem_fun(voter(), &Voter::publishSquelchState));
 } /* Voter::SquelchOpen::entry */
 
@@ -1141,9 +1161,9 @@ float Voter::SquelchOpen::signalStrength(void)
 
 void Voter::SquelchOpen::changeActiveSrx(SatRx *srx)
 {
-  runTask(bind(mem_fun(activeSrx(), &SatRx::stopOutput), true));
+  runTask(bind(mem_fun(*activeSrx(), &SatRx::stopOutput), true));
   SUPER::changeActiveSrx(srx);
-  runTask(bind(mem_fun(activeSrx(), &SatRx::stopOutput), false));  
+  runTask(bind(mem_fun(*activeSrx(), &SatRx::stopOutput), false));
 } /* Voter::SquelchOpen::changeActiveSrx */
 
 
