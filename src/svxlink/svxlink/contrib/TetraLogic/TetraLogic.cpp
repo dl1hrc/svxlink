@@ -136,7 +136,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "16102025"
+#define TETRA_LOGIC_VERSION "14112025"
 
 /****************************************************************************
  *
@@ -2692,12 +2692,9 @@ void TetraLogic::handleCreg(std::string m_message)
      reg_mni << ", state=" << RegStat[reg_state];
   log(LOGDEBUG, ss.str());
 
-  string s = "registration_state " + reg_la;
-  s += " ";
-  s += reg_mni;
-  s += " ";
-  s += reg_state;
-  processEvent(s);
+  stringstream sl;
+  sl <<  "registration_state " << reg_la << " " << reg_mni << " " << reg_state;
+  processEvent(sl.str());
 } /* TetraLogic::handleCreg */
 
 

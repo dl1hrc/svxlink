@@ -399,7 +399,7 @@ proc distance_rpt_ms {tsi distance bearing} {
 
 #
 # Executed when the MS sends a message about the state of a Sds
-# +CMGS= <called party identity >, <length><CR><LF>user data<CtrlZ> 
+# +CMGS= <called party identity >, <length><CR><LF>user data<CtrlZ>
 #
 proc sent_message {response} {
 
@@ -456,7 +456,8 @@ proc remote_received_tg_updated {logic tg} {
 #
 proc rssi {rssi} {
   puts "current RSSI: $rssi dBm";
-  sendSds 2629143 "Current RSSI=$rssi dBm";
+  #sendSds 2629143 "Current RSSI=$rssi dBm";
+  #exec /usr/bin/wget -q -O - "http://mydomain.org/cgi-bin/rssi.pl?id=10&rssi=$rssi&issi_tbs=262905&issi_ms=2629143";
 }
 
 
