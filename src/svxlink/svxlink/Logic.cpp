@@ -886,6 +886,7 @@ bool Logic::activateModule(Module *module)
     audio_to_module_splitter->enableSink(module, true);
     module->activate();
     event_handler->setVariable("active_module", module->name());
+    active_module->publishStateEvent.connect(mem_fun(*this, &Logic::onPublishStateEvent));
     return true;
   }
 
