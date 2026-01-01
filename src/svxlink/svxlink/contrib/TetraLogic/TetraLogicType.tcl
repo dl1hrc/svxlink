@@ -114,21 +114,6 @@ proc command_failed {cmd} {
 
 
 #
-# Executed once every whole minute
-#
-proc every_minute {} {
-}
-
-
-#
-# Executed once every second
-#
-proc every_second {} {
-
-}
-
-
-#
 # Executed each time the transmitter is turned on or off
 #
 proc transmit {is_on} {
@@ -509,12 +494,6 @@ proc dapnet_message_received {tsi message} {
 proc example {} {
   sendSds 12345 "Testmessage";
   setupCall 12345;
-}
-
-#
-#
-#
-proc startup {} {
 }
 
 
