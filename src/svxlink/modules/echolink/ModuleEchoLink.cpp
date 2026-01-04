@@ -1581,6 +1581,7 @@ void ModuleEchoLink::broadcastTalkerStatus(void)
     talkerstate["tsi"] = talker->stationData().id();
     talkerstate["comment"] = talker->stationData().description();
     talkerstate["last_activity"] = ti;
+    talkerstate["is_active"] = talker->receivingAudio();
 
     Json::StreamWriterBuilder builder;
     builder["commentStyle"] = "None";
