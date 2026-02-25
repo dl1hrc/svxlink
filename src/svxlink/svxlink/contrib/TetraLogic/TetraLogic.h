@@ -372,6 +372,8 @@ class TetraLogic : public Logic
     std::string vendor;
     std::string model;
     int inactive_time;
+    bool muteLinking;
+    int muteTg; 
 
     void initPei(void);
     void onCharactersReceived(char *buf, int count);

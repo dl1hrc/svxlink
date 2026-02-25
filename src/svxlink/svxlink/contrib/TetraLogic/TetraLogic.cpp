@@ -136,7 +136,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "01012026"
+#define TETRA_LOGIC_VERSION "25022026"
 
 /****************************************************************************
  *
@@ -216,7 +216,8 @@ TetraLogic::TetraLogic(void)
   pei_pty(0), ai(-1), check_qos(0), qos_sds_to("0815"), qos_limit(-90),
   qosTimer(300000, Timer::TYPE_ONESHOT, false),
   userRegTimer(120000, Timer::TYPE_ONESHOT, false), min_rssi(100), max_rssi(100),
-  reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model(""), inactive_time(3600)
+  reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model(""), inactive_time(3600),
+  muteLinking (false)
 {
   peiComTimer.expired.connect(mem_fun(*this, &TetraLogic::onComTimeout));
   peiActivityTimer.expired.connect(mem_fun(*this,
@@ -735,6 +736,8 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     log(LOGDEBUG, "QOS enabled");
   }
 
+  cfg().getValue(name(),"MUTE_TG", muteTg);
+
   // start the user registration timer, after expiration
   // it checks the registration state of the registered users
   userRegTimer.setEnable(true);
@@ -1234,7 +1237,9 @@ void TetraLogic::handleCallBegin(std::string message)
   // set the correct length of tsi to 17
   if (o_tsi.length() != 17)
   {
-    tt << setfill('0') << setw(4) << t_ci.o_mcc << setfill('0') << setw(5) << t_ci.o_mnc << setfill('0') << setw(8) << t_ci.o_issi;
+    tt << setfill('0') << setw(4) << t_ci.o_mcc 
+       << setfill('0') << setw(5) << t_ci.o_mnc 
+       << setfill('0') << setw(8) << t_ci.o_issi;
     o_tsi = tt.str();
   }
 
@@ -1266,7 +1271,9 @@ void TetraLogic::handleCallBegin(std::string message)
   if (d_tsi.length() != 17)
   {
     tt.str("");
-    tt << setfill('0') << setw(4) << t_ci.d_mcc << setfill('0') << setw(5) << t_ci.d_mnc << setfill('0') << setw(8) << t_ci.d_issi;
+    tt << setfill('0') << setw(4) << t_ci.d_mcc 
+       << setfill('0') << setw(5) << t_ci.d_mnc 
+       << setfill('0') << setw(8) << t_ci.d_issi;
     d_tsi = tt.str();
   }
 
@@ -1313,6 +1320,20 @@ void TetraLogic::handleCallBegin(std::string message)
   qsoinfo["active_issi"] = o_tsi;
   qsoinfo["message"] = "Qso:info";
   publishInfo("Qso:info", qsoinfo);
+
+  if (t_ci.d_issi == muteTg)
+  {
+    muteLinking = true;
+    stringstream m_mutemsg;
+    m_mutemsg << "Mute Linking due to configuration (" << t_ci.d_issi 
+              << " == " << muteTg <<")";
+    log(LOGDEBUG, m_mutemsg.str());
+    setMuteLinking(muteLinking);
+  }
+  else
+  {
+    muteLinking = false;
+  }
 
   // callup tcl event
   ss << "groupcall_begin " << t_ci.o_issi << " " << t_ci.d_issi;
