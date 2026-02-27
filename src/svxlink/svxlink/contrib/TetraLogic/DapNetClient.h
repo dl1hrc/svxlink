@@ -201,7 +201,7 @@ class DapNetClient : public Async::TcpClient<>
     void onDapwebDisconnected(Async::TcpConnection *con,
       	      	      	 Async::TcpConnection::DisconnectReason reason);
     int onDapwebDataReceived(Async::TcpConnection *con, void *data, int size);
-    char* encodeBase64(const char input_str[], int len_str);
+    std::string encodeBase64(const std::string& input);
     void handleTimeSync(std::string msg);
     void handleDapType4(std::string msg);
     void handleDapText(std::string msg);

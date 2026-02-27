@@ -76,7 +76,7 @@ using namespace SvxLink;
  ****************************************************************************/
 
 #define DAPNETSOFT "SvxLink-TetraGw"
-#define DAPNETVERSION "16102025"
+#define DAPNETVERSION "27022026"
 
 #define INVALID 0
 
@@ -416,7 +416,7 @@ void DapNetClient::onDapwebConnected(void)
      << "Host: " << dapnet_webhost << ":" 
      << dapnet_webport << "\r\n"
      << "Authorization: Basic " 
-     << encodeBase64(auth.c_str(), auth.length()) << "\r\n"
+     << encodeBase64(auth) << "\r\n"
      << "User-Agent: " << DAPNETSOFT << "/" << DAPNETVERSION << "\r\n"
      << "Accept: */*\r\n"
      << "Content-Type: application/json\r\n"
@@ -428,56 +428,36 @@ void DapNetClient::onDapwebConnected(void)
 } /* DapNetClient::onDapwebConnected */
 
 
-// This method has copyed from:
-// https://www.geeksforgeeks.org/encode-ascii-string-base-64-format/
-char* DapNetClient::encodeBase64(const char input_str[], int len_str)
+std::string DapNetClient::encodeBase64(const std::string& input)
 {
-  // Character set of base64 encoding scheme
-  char char_set[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  char *res_str = (char *) malloc(1000 * sizeof(char));
-
-  int index, no_of_bits = 0, padding = 0, val = 0, count = 0, temp;
-  int i, j, k = 0;
-
-  // Loop takes 3 characters at a time from 
-  // input_str and stores it in val
-  for (i = 0; i < len_str; i += 3)
+  static const char charset[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789+/";
+  std::string output;
+  output.reserve(((input.size() + 2) / 3) * 4);
+  unsigned int val = 0;
+  int valb = -6;
+  for (unsigned char c : input)
   {
-    val = 0, count = 0, no_of_bits = 0;
-
-    for (j = i; j < len_str && j <= i + 2; j++)
+    val = (val << 8) + c;
+    valb += 8;
+    while (valb >= 0)
     {
-      val = val << 8;
-      val = val | input_str[j];
-      count++;
-    }
-
-    no_of_bits = count * 8;
-    padding = no_of_bits % 3;
-    while (no_of_bits != 0)
-    {
-      if (no_of_bits >= 6)
-      {
-        temp = no_of_bits - 6;
-        index = (val >> temp) & 63;
-        no_of_bits -= 6;
-      }
-      else
-      {
-        temp = 6 - no_of_bits;
-        index = (val << temp) & 63;
-        no_of_bits = 0;
-      }
-      res_str[k++] = char_set[index];
+      output.push_back(charset[(val >> valb) & 0x3F]);
+      valb -= 6;
     }
   }
-  for (i = 1; i <= padding; i++)
+  if (valb > -6)
   {
-    res_str[k++] = '=';
+    output.push_back(charset[((val << 8) >> (valb + 8)) & 0x3F]);
   }
-  res_str[k] = '\0';
-  return res_str;
-} /* DapNetClient::encode_base64 */
+  while (output.size() % 4)
+  {
+    output.push_back('=');
+  }
+  return output;
+} /* DapNetClient::encodeBase64 */
 
 
 void DapNetClient::onDapwebDisconnected(TcpConnection *con, 
