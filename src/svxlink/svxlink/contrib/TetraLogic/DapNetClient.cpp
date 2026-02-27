@@ -367,7 +367,7 @@ int DapNetClient::onDapnetDataReceived(TcpConnection *con, void *buf, int count)
   string message(str, str+count);
   dapmessage += message;
 
-  if (message[0] == 0x00)
+  if (!message.empty() && message[0] == 0x00)
   {
     dapmessage.erase();
   }
@@ -464,7 +464,7 @@ void DapNetClient::onDapwebDisconnected(TcpConnection *con,
                 TcpClient<>::DisconnectReason reason)
 {
   dapnetLogmessage(LOGDEBUG, "+++ disconnected from Dapnetweb, reason="
-                   + reason);
+                   + std::to_string(reason));
 } /* DapNetClient::onDapwebDisconnected */
 
 
