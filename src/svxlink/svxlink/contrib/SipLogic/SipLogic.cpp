@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -91,7 +91,7 @@ using namespace pj;
  *
  ****************************************************************************/
 #define DEFAULT_SIPLIMITER_THRESH  -1.0
-#define PJSIP_VERSION "21082025"
+#define PJSIP_VERSION "27022026"
 
 
 /****************************************************************************
@@ -123,7 +123,7 @@ namespace sip {
         onCall(this, prm);
       }
 
-      virtual void onInstantMessage(pj::OnInstantMessageParam &prm)
+      virtual void onInstandMessage(pj::OnInstantMessageParam &prm)
       {
         onMessage(this, prm);
       }
@@ -1043,6 +1043,7 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
 
   ss << "ringing \"" << caller << "\"";
   processLogicEvent(ss.str());
+  ss.str("");
   ss.clear();
 
   if (regexec(reject_incoming_regex, caller.c_str(), 0, 0, 0) == 0)
@@ -1178,11 +1179,9 @@ pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame
 
   if ((got = m_ar->readSamples(smpl, count)) > 0)
   {
-    int i = 0;
-    for (float* s = smpl; s < smpl + sizeof(float)*got; s += sizeof(float))
+    for (int i = 0; i < got; i++)
     {
       samples[i] = (pj_int16_t)(smpl[i] * 32768);
-      i++;
     }
   }
 
