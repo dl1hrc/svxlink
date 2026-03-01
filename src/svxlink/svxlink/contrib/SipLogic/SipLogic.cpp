@@ -1577,8 +1577,10 @@ void SipLogic::playSipDtmf(const std::string& digits, int amp, int len)
 
 void SipLogic::unregisterCall(sip::_Call *call)
 {
-  for (std::vector<sip::_Call *>::iterator it=calls.begin();
-         it != calls.end(); it++)
+  if (!call)
+     return;
+    // Call aus der Liste entfernen
+  for (auto it = calls.begin(); it != calls.end(); ++it)
   {
     if (*it == call)
     {
@@ -1586,12 +1588,15 @@ void SipLogic::unregisterCall(sip::_Call *call)
       break;
     }
   }
-
+    // WICHTIG:
+    // sip::_Call ist sigc::trackable
+    // → beim Löschen werden automatisch ALLE Signalverbindungen getrennt
+  delete call;
+    // Wenn keine Calls mehr existieren, Audio schließen
   if (calls.empty())
   {
     m_outto_sip->setOpen(false);
     m_infrom_sip->setOpen(false);
-    //squelch_det->reset();
   }
 } /* SipLogic::unregisterCall */
 
