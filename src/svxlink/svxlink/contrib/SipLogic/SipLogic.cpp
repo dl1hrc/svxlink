@@ -1505,7 +1505,7 @@ void SipLogic::callTimeout(Async::Timer *t)
   processLogicEvent("call_timeout");
   m_call_timeout_timer.setEnable(false);
   m_call_timeout_timer.reset();
-} /* SipLogic::flushTimeout */
+} /* SipLogic::callTimeout */
 
 
 void SipLogic::flushTimeout(Async::Timer *t)
