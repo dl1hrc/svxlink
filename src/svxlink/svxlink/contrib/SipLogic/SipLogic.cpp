@@ -1187,7 +1187,7 @@ pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame
 {
 
     // Anzahl der Samples im Frame bestimmen
-  int count = frame->size / 2 / PJMEDIA_PIA_CCNT(&port->info);
+  pj_size_t count = frame->size / 2 / PJMEDIA_PIA_CCNT(&port->info);
   frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
   if (count <= 0) return PJ_SUCCESS;
 
@@ -1212,7 +1212,7 @@ pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame
     }
   }
     // fill the rest with 0.0
-    for (int i = got; i < count; i++) 
+    for (pj_size_t i = got; i < count; i++) 
         samples[i] = 0;
     return PJ_SUCCESS;
 } /* SipLogic::mediaPortGetFrame */
