@@ -1491,19 +1491,18 @@ std::string SipLogic::getCallerNumber(std::string uri)
 
 void SipLogic::callTimeout(Async::Timer *t)
 {
-
-  for (std::vector<sip::_Call *>::iterator it=calls.begin();
-       it != calls.end(); it++)
+  std::vector<sip::_Call *> calls_to_hangup;
+  
+  for (auto *call : calls)
   {
-    if (!(*it)->hasMedia())
-    {
-      hangupCall(*it);
-    }
+    if (!call->hasMedia())
+      calls_to_hangup.push_back(call);
   }
 
-  stringstream ss;
-  ss << "call_timeout";
-  processLogicEvent(ss.str());
+  for (auto *call : calls_to_hangup)
+    hangupCall(call);
+
+  processLogicEvent("call_timeout");
   m_call_timeout_timer.setEnable(false);
   m_call_timeout_timer.reset();
 } /* SipLogic::flushTimeout */
