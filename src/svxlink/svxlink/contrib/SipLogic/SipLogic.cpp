@@ -1321,7 +1321,7 @@ void SipLogic::onCallState(sip::_Call *call, pj::OnCallStateParam &prm)
 
 void SipLogic::onMessageInfo(sip::_Call *call, pj::OnInstantMessageParam &prm)
 {
-  std::string body = prm.msgBody;
+  //std::string body = prm.msgBody;
   std::string uri = prm.contactUri;
   SipRxData message = prm.rdata;
   std::string contactUri = prm.contactUri;
