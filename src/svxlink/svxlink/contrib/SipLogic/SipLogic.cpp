@@ -1164,47 +1164,35 @@ void SipLogic::onMediaState(sip::_Call *call, pj::OnCallMediaStateParam &prm)
 pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame)
 {
 
-  int got = 0;
+    // Anzahl der Samples im Frame bestimmen
   int count = frame->size / 2 / PJMEDIA_PIA_CCNT(&port->info);
-  float* smpl = new float[count+1]();
-  pj_int16_t *samples = static_cast<pj_int16_t *>(frame->buf);
   frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
+  if (count <= 0) return PJ_SUCCESS;
 
-  if (!smpl)
-  {
-    cout << "*** Race condition smpl-pointer is null\n";
-    return PJ_SUCCESS;
-  }
-
-  if ((got = m_ar->readSamples(smpl, count)) > 0)
+    // Zielpuffer (16 Bit Samples)
+  pj_int16_t *samples = static_cast<pj_int16_t *>(frame->buf);
+    // Float-Puffer ohne Heap-Allokation
+  std::vector<float> smpl(count, 0.0f);
+    // Samples aus SvxLink lesen
+  int got = m_ar->readSamples(smpl.data(), count);
+    // Konvertiere die empfangenen Float-Samples
+  if (got > 0)
   {
     for (int i = 0; i < got; i++)
     {
       float v = smpl[i];
-      // security checks (NaN, Inf, etc.)
+          // for security: NaN/Inf
       if (!std::isfinite(v)) v = 0.0f;
-      // limit for security
-      if (v > 1.0f) v = 1.0f;
+            // limit to [-1.0, 1.0]
+      if (v > 1.0f)  v = 1.0f;
       if (v < -1.0f) v = -1.0f;
       samples[i] = static_cast<pj_int16_t>(v * 32768.0f);
     }
-  } 
-
-  delete [] smpl;
-
-  /*
-    The pjsip framework requests 768 samples on every call. The SvxLink
-    framework can only deliver samples if the sql isn't closed and
-    m_logic_con_in provides some. Since the documentation of pjsip is poor
-    I can not predict the behaviour if we provide less samples than the
-    requested number. So we will fill the buffer with 0
-  */
-  while (++got < count)
-  {
-    samples[got] = (pj_int16_t) 0;
   }
-
-  return PJ_SUCCESS;
+    // fill the rest with 0.0
+    for (int i = got; i < count; i++) 
+        samples[i] = 0;
+    return PJ_SUCCESS;
 } /* SipLogic::mediaPortGetFrame */
 
 
@@ -1213,25 +1201,31 @@ pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame
  */
 pj_status_t SipLogic::mediaPortPutFrame(pjmedia_port *port, pjmedia_frame *frame)
 {
-  int pos = 0;
+  // calculate number of frames
   int count = frame->size / 2 / PJMEDIA_PIA_CCNT(&port->info);
-
-  if (count > 0)
+  if (count <= 0)
+    return PJ_SUCCESS;
+  frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
+  pj_int16_t *samples = static_cast<pj_int16_t *>(frame->buf);
+    // Float-buffer without heap-allocation
+  std::vector<float> smpl(count);
+    // 16‑Bit integer → float conversion
+  for (int i = 0; i < count; i++)
   {
-    pj_int16_t *samples = static_cast<pj_int16_t *>(frame->buf);
-    frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
-    float* smpl = new float[count+1]();
-    for (int i=pos; i < count; i++)
-    {
-      smpl[i] = (float) (samples[i] / 32768.0);
-    }
-    do {
-      int ret = m_out_src->writeSamples(smpl + pos, count - pos);
-      pos += ret;
-    } while (pos < count);
-    delete [] smpl;
+    smpl[i] = samples[i] / 32768.0f;
   }
-
+  // transfer audio to svxlink
+  int pos = 0;
+  while (pos < count)
+  {
+    int ret = m_out_src->writeSamples(&smpl[pos], count - pos);
+    if (ret <= 0)
+    {
+      // Deadlock-protection
+      break;
+    }
+    pos += ret;
+  }
   return PJ_SUCCESS;
 } /* SipLogic::mediaPortPutFrame */
 
