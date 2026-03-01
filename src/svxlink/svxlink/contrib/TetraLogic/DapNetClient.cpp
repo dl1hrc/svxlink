@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -135,13 +135,15 @@ using namespace SvxLink;
  ****************************************************************************/
 
 DapNetClient::DapNetClient(Config &cfg, const string& name)
-  : cfg(cfg), name(name), dapcon(0), debug(0)
+  : cfg(cfg), name(name), dapcon(0), debug(0), dapwebcon(0),
+    dapnet_comtimeout_timer(0), force_disconnect_timer(0)
 {
 } /* DapNetClient */
 
 
 DapNetClient::~DapNetClient(void)
 {
+  delete reconnect_timer;
   reconnect_timer = 0;
   delete dapcon;
   dapcon = 0;
@@ -202,7 +204,18 @@ bool DapNetClient::initialize(void)
         }
         else
         {
-          ric2issi[atoi((*slit).c_str())] = issiList;
+          try
+          {
+            int ric = std::stoi(*slit);
+            ric2issi[ric] = issiList;
+          }
+          catch (const std::exception& e)
+          {
+            dapnetLogmessage(LOGERROR,
+            "** ERROR: Invalid RIC value '" + *slit + "' in section "
+                + ric_section);
+            isok = false; 
+          }
           dapnetLogmessage(LOGINFO, "RIC:" + *slit + "=ISSI:" + value);
         }
       }
@@ -222,7 +235,16 @@ bool DapNetClient::initialize(void)
       for (slit=dn2ric_list.begin(); slit!=dn2ric_list.end(); slit++)
       {
         cfg.getValue(ric_section, *slit, value);
-        ric2rubrics[atoi((*slit).c_str())] = value;
+        try
+        {
+          int ric = std::stoi(*slit);
+          ric2rubrics[ric] = value;
+        }
+        catch (const std::exception& e)
+        {
+          dapnetLogmessage(LOGERROR, "*** ERROR: Invalid RIC '" + *slit + "'");
+          isok = false;
+        }
         dapnetLogmessage(LOGINFO, "RIC:" + *slit + "=rubrics:" + value);
       }
     }
@@ -310,7 +332,10 @@ bool DapNetClient::sendDapMessage(std::string call, std::string message)
 
   dapnetLogmessage(LOGTRACE, "DapNetClient::sendDapMessage: destcall="
         + destcall + ", message=" + destmessage);
-  dapwebcon->connect();
+  if (dapwebcon != nullptr)
+  {
+    dapwebcon->connect();
+  }
   return true;
 } /* DapNetClient::sendDapMessage */
 
@@ -340,8 +365,9 @@ void DapNetClient::onDapnetConnected(void)
   stringstream ss;
   ss << "[" << DAPNETSOFT << " v" << DAPNETVERSION << " " << callsign <<  " "
      << dapnet_key << "]\r\n";
-  dapnetLogmessage(LOGDEBUG, ss.str());
-  dapcon->write(ss.str().c_str(), ss.str().length());
+  std::string s = ss.str();
+  dapnetLogmessage(LOGDEBUG, s);
+  dapcon->write(s.c_str(), s.length());
   reconnect_timer->setEnable(false);
   dapnet_comtimeout_timer->setEnable(true);
 } /* DapNetClient::onDapnetConnected */
@@ -377,7 +403,7 @@ int DapNetClient::onDapnetDataReceived(TcpConnection *con, void *buf, int count)
     if (found != 0)
     {
       handleDapMessage(dapmessage.substr(0, found));
-      dapmessage.erase(0, found+1);
+      dapmessage.erase(0, found + 1);
     }
   }
 
@@ -520,6 +546,12 @@ void DapNetClient::handleDapMessage(std::string dapmessage)
 
 void DapNetClient::handleTimeSync(std::string msg)
 {
+  if (msg.size() < 3)
+  {
+    dapnetLogmessage(LOGERROR,
+      "*** ERROR: handleTimeSync received malformed message: " + msg);
+    return;
+  }
   std::string t_nr = msg.substr(1,2);
   int num = (int)strtol(t_nr.c_str(), NULL, 16);
   if (++num > 255) num = 0;
@@ -533,10 +565,18 @@ void DapNetClient::handleTimeSync(std::string msg)
 
 void DapNetClient::handleDapType4(std::string msg)
 {
+  if (msg.size() < 3)
+  {
+    dapnetLogmessage(LOGERROR,
+      "*** ERROR: handleDapType4 received malformed message: " + msg);
+    return;
+  }
+
   msg.erase(0,2);  // erase "4:"
   for (string::iterator ts = msg.begin(); ts!= msg.end(); ++ts)
   {
-    dapnetLogmessage(LOGINFO, "+++ DAPNET: registered at time slot " + *ts);
+    dapnetLogmessage(LOGINFO, "+++ DAPNET: registered at time slot " +
+       std::string(1,*ts));
   }
 } /* DapNetClient::handleDapType4 */
 
@@ -547,6 +587,13 @@ structure of a dapnet message:
 */
 void DapNetClient::handleDapText(std::string msg)
 {
+  if (msg.size() < 3)
+  {
+    dapnetLogmessage(LOGERROR,
+      "*** ERROR: handleDapText received malformed message: " + msg);
+    return;
+  }
+  
   stringstream t_answ;
   std::string t_nr = msg.substr(1,2);
 
@@ -559,6 +606,15 @@ void DapNetClient::handleDapText(std::string msg)
   // check RIC
   StrList dapList;
   SvxLink::splitStr(dapList, msg, ":");
+
+   // Protect against malformed messages
+  if (dapList.size() < 3)
+  {
+    dapnetLogmessage(LOGERROR,
+      "*** ERROR: handleDapText received malformed message (no 3 columns): "
+      + msg);
+    return;
+  }
 
   unsigned int ric;
   std::stringstream ss;
@@ -574,7 +630,7 @@ void DapNetClient::handleDapText(std::string msg)
   if (j == 4)
   {
     // check if the user is stored? no -> default
-    string t_mesg = msg.substr(i+1, msg.length()-i);
+    string t_mesg = msg.substr(i+1);
 
     if (ric == 4512 || ric == 4520)
     {
@@ -611,7 +667,15 @@ void DapNetClient::handleDapText(std::string msg)
       for(StrList::const_iterator rl=rubricList.begin(); rl!=rubricList.end(); rl++)
       {
         // *rl is one rubric
-        rubric = atoi((*rl).c_str());
+        try
+        {
+          rubric = std::stoi((*rl).c_str());
+        }
+        catch (const std::exception& e)
+        {
+          dapnetLogmessage(LOGERROR, 
+            "*** ERROR: Wrong rubric found: " + *rl);
+        }
         if(rubric == ric)
         {
           iu = ric2issi.find(it->first);
@@ -649,34 +713,47 @@ void DapNetClient::dapOK(void)
 
 int DapNetClient::checkDapMessage(std::string mesg)
 {
-  int retvalue = INVALID;
-  typedef std::map<std::string, int> Mregex;
-  Mregex mre;
-  map<string, int>::iterator rt;
+  // Precompiled regex patterns (compile-once)
+  static std::vector<std::pair<regex_t, int>> patterns;
 
-  mre["^2:[0-9A-F]{4}"]         = DAP_TYPE2;
-  mre["^3:\\+[0-9A-F]{4}"]      = DAP_TYPE3;
-  mre["^4:[0-9A-F]{1,}"]        = DAP_TYPE4;
-  mre["^7:"]                    = DAP_INVALID;
-  mre["^#[0-9A-F]{2} 5:"]       = DAP_TIMESYNC;
-  mre["^#[0-9A-F]{2} 6:"]       = DAP_MESSAGE;
-
-  for (rt = mre.begin(); rt != mre.end(); rt++)
+  // Initialize once
+  if (patterns.empty())
   {
-    if (rmatch(mesg, rt->first))
+    const std::vector<std::pair<std::string, int>> raw = {
+      { "^2:[0-9A-F]{4}",    DAP_TYPE2 },
+      { "^3:\\+[0-9A-F]{4}", DAP_TYPE3 },
+      { "^4:[0-9A-F]{1,}",   DAP_TYPE4 },
+      { "^7:",               DAP_INVALID },
+      { "^#[0-9A-F]{2} 5:",  DAP_TIMESYNC },
+      { "^#[0-9A-F]{2} 6:",  DAP_MESSAGE }
+    };
+
+    patterns.reserve(raw.size());
+    for (const auto& p : raw)
     {
-      retvalue = rt->second;
-      return retvalue;
+      regex_t comp;
+      if (regcomp(&comp, p.first.c_str(), REG_EXTENDED | REG_NOSUB) == 0)
+      {
+        patterns.push_back({ comp, p.second });
+      }
     }
   }
-  return retvalue;
+
+  // Use precompiled regexes
+  for (const auto& entry : patterns)
+  {
+    if (regexec(&entry.first, mesg.c_str(), 0, NULL, 0) == 0)
+      return entry.second;
+  }
+
+  return INVALID;
 } /* DapNetClient::handleDapMessage */
 
 
-bool DapNetClient::rmatch(std::string tok, std::string pattern)
+bool DapNetClient::rmatch(const std::string& tok, const std::string& pattern)
 {
   regex_t re;
-  int status = regcomp(&re, pattern.c_str(), REG_EXTENDED);
+  int status = regcomp(&re, pattern.c_str(), REG_EXTENDED | REG_NOSUB);
   if (status != 0)
   {
     return false;
@@ -694,7 +771,8 @@ string DapNetClient::rot1code(string inmessage)
 
   for (string::iterator it= inmessage.begin(); it!=inmessage.end(); it++)
   {
-    outmessage += (*it - 0x01);
+    unsigned char c = *it;
+    outmessage += char(c > 0 ? c-1 : c);
   }
   return outmessage;
 } /* DapNetClient::rot1code */

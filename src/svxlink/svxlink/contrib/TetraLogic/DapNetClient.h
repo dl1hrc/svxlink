@@ -210,7 +210,7 @@ class DapNetClient : public Async::TcpClient<>
     void handleDapMessage(std::string dapmessage);
     void reconnectDapnetServer(Async::Timer *t);
     int checkDapMessage(std::string mesg);
-    bool rmatch(std::string tok, std::string pattern);
+    bool rmatch(const std::string& tok, const std::string& pattern);
     std::string rot1code(std::string inmessage);
     void responseTimeout(Async::Timer *t);
     void forceDisconnect(void);

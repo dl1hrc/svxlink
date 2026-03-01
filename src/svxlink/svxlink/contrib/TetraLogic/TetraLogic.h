@@ -438,6 +438,7 @@ class TetraLogic : public Logic
     bool getConfigValue(const std::string& section,
          const std::string& tag, std::string& value);
     std::string jsonToString(Json::Value eventmessage);
+    bool isPendingSdsValid();
     void dummy(const std::string& info);
 };  /* class TetraLogic */
 

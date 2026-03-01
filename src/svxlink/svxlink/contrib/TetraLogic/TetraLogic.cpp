@@ -136,7 +136,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "25022026"
+#define TETRA_LOGIC_VERSION "27022026"
 
 /****************************************************************************
  *
@@ -530,7 +530,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       {
         Json::Value& t_a = t_peiinit["commands"];
         log(LOGDEBUG,
-        "+++ Reading AT-commands to initialze PEI-device. Reading from file" +
+        "+++ Reading AT-commands to initialize PEI-device. Reading from file" +
         pei_init_file + "\"");
         for (Json::Value::ArrayIndex j = 0; j < t_a.size(); j++)
         {
@@ -654,7 +654,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     {
       cfg().getValue(status_section, *slit, value);
       isds = static_cast<unsigned int>(std::stoul(*slit));
-      if(isds < 32768 || isds > 65536)
+      if(isds < 32768 || isds > 65535)
       {
         stringstream ss;
         ss << "*** ERROR: Sds decimal value in section " << name() <<
@@ -742,7 +742,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   // it checks the registration state of the registered users
   userRegTimer.setEnable(true);
 
-  // hadle the Pei serial port
+  // handle the Pei serial port
   pei = new Serial(port);
   if (!pei->open())
   {
@@ -846,7 +846,7 @@ void TetraLogic::transmitterStateChange(bool is_transmitting)
   {
     if (!talkgroup_up)
     {
-      log(LOGTRACE, "TetraLogic::transmitterStateChange: " + gssi);
+      log(LOGTRACE, "TetraLogic::transmitterStateChange: " + to_string(gssi));
       initGroupCall(gssi);
       talkgroup_up = true;
     }
@@ -1004,7 +1004,7 @@ void TetraLogic::onCharactersReceived(char *buf, int count)
   peiActivityTimer.reset();
   size_t found;
 
-  peistream += buf;
+  peistream.append(buf, count);
 
   /*
   The asynchronous handling of incoming PEI commands is not easy due
@@ -1144,6 +1144,7 @@ void TetraLogic::handlePeiAnswer(std::string m_message)
 
     case INVALID:
       log(LOGWARN, "+++ Pei answer not known, ignoring ;)");
+      break;
 
     default:
       break;
@@ -1391,7 +1392,7 @@ void TetraLogic::firstContact(Sds tsds)
   userdata[tsds.tsi].aprs_tab = t_aprs_tab;
   userdata[tsds.tsi].last_activity = ti;
 
-  registerUser(tsds.tsi); // Updsate registration at reflector
+  registerUser(tsds.tsi); // Update registration at reflector
 
   if (infosds.length() > 0)
   {
@@ -1541,7 +1542,8 @@ void TetraLogic::handleSdsMsg(std::string sds)
   sdsinfo["sendertsi"] = t_sds.tsi;
   sdsinfo["type"] = t_sds.type;
   sdsinfo["from"] = userdata[t_sds.tsi].call;
-  sdsinfo["to"] = userdata[pSDS.totsi].call;
+  auto to = userdata.find(pSDS.totsi);
+  sdsinfo["to"] = (to != userdata.end() ? to->second.call : "");
   sdsinfo["receivertsi"] = pSDS.totsi;
   sdsinfo["gateway"] = callsign();
   sdsinfo["message"] = "Sds:info";
@@ -1560,7 +1562,7 @@ void TetraLogic::handleSdsMsg(std::string sds)
   {
     processEvent(ss.str());
   }
-} /* TetraLogic::getTypeOfService */
+} /* TetraLogic::handleSdsMsg */
 
 
 // 6.15.6 TETRA Group Set up
@@ -1574,7 +1576,7 @@ std::string TetraLogic::handleCtgs(std::string m_message)
   size_t f = m_message.find("+CTGS: ");
   if ( f != string::npos)
   {
-    m_message.erase(0,7);
+    m_message.erase(0, f + 7);
   }
   return m_message;
 } /* TetraLogic::handleCtgs */
@@ -1622,9 +1624,9 @@ void TetraLogic::handleClvl(std::string m_message)
 {
   stringstream ss;
   size_t f = m_message.find("+CLVL: ");
-  if ( f != string::npos)
+  if (f != string::npos)
   {
-    m_message.erase(0,7);
+    m_message.erase(0, f + 7);
   }
 
   ss << "audio_level " << getNextVal(m_message);
@@ -1662,6 +1664,7 @@ void TetraLogic::handleCmgs(std::string m_message)
     if (state == SDS_SEND_FAILED)
     {
       log(LOGERROR, "*** ERROR: Sending message failed. Will send again...");
+      checkSds();
     }
     else if(state == SDS_SEND_OK)
     {
@@ -1760,11 +1763,10 @@ std::string TetraLogic::getTSI(std::string issi)
 {
   stringstream ss;
   char is[18];
-  int len = issi.length();
   int t_mcc;
   std::string t_issi;
 
-  if (len < 9)
+  if (issi.length()< 9)
   {
     sprintf(is, "%08d", atoi(issi.c_str()));
     ss << mcc << mnc << is;
@@ -1784,11 +1786,18 @@ std::string TetraLogic::getTSI(std::string issi)
   }
 
   // get ISSI (8 digits)
-  t_issi = issi.substr(len-8,8);
-  issi.erase(len-8,8);
+  t_issi = issi.substr(issi.length()-8, 8);
+  issi.erase(issi.length()-8, 8);
 
-  sprintf(is, "%04d%05d%s", t_mcc, atoi(issi.c_str()), t_issi.c_str());
-  ss << is;
+  std::ostringstream oss;
+  oss << std::setfill('0') << std::setw(4) << t_mcc
+      << std::setfill('0') << std::setw(5) << atoi(issi.c_str())
+      << t_issi;
+  ss << oss.str();
+  
+  
+  //sprintf(is, "%04d%05d%s", t_mcc, atoi(issi.c_str()), t_issi.c_str());
+  //ss << is;
 
   return ss.str();
 } /* TetraLogic::getTSI */
@@ -1869,16 +1878,23 @@ void TetraLogic::handleCallReleased(std::string message)
 
     // prepare event for tetra users to be send over the network
     Json::Value qsoinfo(Json::objectValue);
+
     qsoinfo["last_activity"] = ti;
     qsoinfo["qso_active"] = false;
-    qsoinfo["last_talker"] = callinfo[cci].o_issi;
     qsoinfo["qso_members"] = joinList(Qso.members);
     qsoinfo["gateway"] = callsign();
     qsoinfo["cci"] = cci;
-    qsoinfo["aimode"] = callinfo[cci].aistatus;
-    qsoinfo["dest_mcc"] = callinfo[cci].d_mcc;
-    qsoinfo["dest_mnc"] = callinfo[cci].d_mnc;
-    qsoinfo["dest_issi"] = callinfo[cci].d_issi;
+
+    auto ci = callinfo.find(cci);
+    if (ci != callinfo.end())
+    {
+      qsoinfo["last_talker"] = ci->second.o_issi;
+      qsoinfo["aimode"] = ci->second.aistatus;
+      qsoinfo["dest_mcc"] = ci->second.d_mcc;
+      qsoinfo["dest_mnc"] = ci->second.d_mnc;
+      qsoinfo["dest_issi"] = ci->second.d_issi;
+    }
+
     publishInfo("Qso:info", qsoinfo);
     sendAprs(userdata[Qso.tsi].call, m_aprsmesg);
   }
@@ -1912,7 +1928,8 @@ std::string TetraLogic::joinList(std::list<std::string> members)
     qi += it;
     qi += ",";
   }
-  return qi.substr(0,qi.length()-1);
+  if (qi.empty()) return "";
+  return qi.substr(0, qi.length() - 1);
 } /* TetraLogic::joinList */
 
 
@@ -2053,6 +2070,7 @@ void TetraLogic::sdsPtyReceived(const void *buf, size_t count)
   const char *buffer = reinterpret_cast<const char*>(buf);
   std::string injmessage = "";
 
+  if (count == 0) return;
   for (size_t i=0; i<count-1; i++)
   {
     injmessage += *buffer++;
@@ -2061,7 +2079,7 @@ void TetraLogic::sdsPtyReceived(const void *buf, size_t count)
   string m_tsi = getNextStr(injmessage);
   string type = getNextStr(injmessage);
 
-  // put the new Sds int a queue...
+  // put the new Sds into a queue...
   Sds t_sds;
   t_sds.tsi = m_tsi;
   t_sds.message = injmessage;
@@ -2132,7 +2150,7 @@ void TetraLogic::sendInfoSds(std::string tsi, short reason)
           processEvent(sstcl.str());
         }
 
-         // put the new Sds int a queue...
+         // put the new Sds into a queue...
         Sds t_sds;
         t_sds.tsi = t_iu->first;
         t_sds.message = ss.str();
@@ -2369,11 +2387,19 @@ void TetraLogic::clearOldSds(void)
   // delete all old Sds //
   for (it=sdsQueue.begin(); it!=sdsQueue.end(); it++)
   {
-    if (it->second.tos != 0 && difftime(it->second.tos, time(NULL)) > inactive_time)
+    if (it->second.tos != 0 && difftime(time(NULL), it->second.tos) > inactive_time)
     {
       log(LOGTRACE, "TetraLogic::clearOldSds: " + it->second.tsi
             + "->" + it->second.message);
       todelete.push_back(it->first);
+      
+      // NEU: pending_sds direkt invalidieren wenn es gelöscht wird
+      if (it->second.id == pending_sds.id)
+      {
+        log(LOGDEBUG, "clearOldSds: invalidating pending_sds id="
+              + to_string(pending_sds.id));
+        pending_sds = Sds();  // zurücksetzen
+      }
     }
   }
   for (vector<int>::iterator del=todelete.begin(); del!=todelete.end(); del++)
@@ -2391,6 +2417,12 @@ bool TetraLogic::checkSds(void)
   if (sdsQueue.size() < 1) return retsds;
 
   clearOldSds();
+
+  // NEU: Nach clearOldSds prüfen ob pending_sds noch in der Queue existiert
+  if (!isPendingSdsValid())
+  {
+    pending_sds = Sds();  // zurücksetzen auf Leerzustand
+  }
 
   // if message is sent -> get next available sds message
   if (pending_sds.tod != 0 || (pending_sds.tod == 0 && pending_sds.tos == 0))
@@ -2497,7 +2529,7 @@ void TetraLogic::onDapnetMessage(string tsi, string message)
 {
   log(LOGINFO, "+++ new Dapnet message received for " + tsi + ":" + message);
 
-  // put the new Sds int a queue...
+  // put the new Sds into a queue...
   Sds t_sds;
   t_sds.tsi = tsi;
   t_sds.remark = "DAPNET message";
@@ -2573,6 +2605,7 @@ void TetraLogic::peiPtyReceived(const void *buf, size_t count)
   const char *buffer = reinterpret_cast<const char*>(buf);
   std::string in = "";
 
+  if (count == 0) return;
   for (size_t i=0; i<count-1; i++)
   {
     in += *buffer++;
@@ -2649,7 +2682,6 @@ void TetraLogic::handleRssi(std::string m_message)
     t_rssi["mni"] = reg_mni;
     t_rssi["call"] = callsign();
     t_rssi["la"] = reg_la;
-    t_rssi["last_activity"] = ti;
     t_rssi["rssi"] = rssi;
     t_rssi["max_rssi"] = *max_element(rssi_list.begin(), rssi_list.end());
     t_rssi["min_rssi"] = *min_element(rssi_list.begin(), rssi_list.end());
@@ -2704,7 +2736,7 @@ void TetraLogic::checkReg(void)
 void TetraLogic::handleCreg(std::string m_message)
 {
   // +CREG: 1,1,90109999
-  if (m_message.length()>5) m_message.erase(0,6);
+  if (m_message.length() > 6) m_message.erase(0,7);
   reg_state = getNextVal(m_message);
   reg_la = getNextVal(m_message); // 14-bit Location Area code
   reg_mni = getNextVal(m_message); // 24-bit Mobile Network Identity
@@ -2724,6 +2756,7 @@ void TetraLogic::handleModel(std::string m_message)
   // +GMM: 54007,M83PF-----AN,88.2.0.0
   m_message.erase(0,6);
   model = getNextStr(m_message);
+  if (!model.empty() && model.back() == '\r') model.pop_back();
 } /* TetraLogic::handleModel */
 
 
@@ -2732,6 +2765,7 @@ void TetraLogic::handleVendor(std::string m_message)
   // +GMI: MOTOROLA
   m_message.erase(0,6);
   vendor = m_message;
+  if (!vendor.empty() && vendor.back() == '\r') vendor.pop_back();
 } /* TetraLogic::handleVendor */
 
 
@@ -2830,7 +2864,7 @@ void TetraLogic::sendSds(const std::string& issi, const std::string& message)
   t_sds.tsi = issi;
   t_sds.message = message;
   t_sds.type = TEXT;
-  t_sds.remark = "by Tcl procedur sendSds";
+  t_sds.remark = "by Tcl procedure sendSds";
   queueSds(t_sds);
 } /* TetraLogic::sendSds */
 
@@ -2858,6 +2892,14 @@ void TetraLogic::dummy(const std::string& info)
 {
   cout << "Tetra-Logic::dummy: " << info << endl;
 } /* TetraLogic::dummy */
+
+
+// Neue Hilfsfunktion: prüft ob pending_sds.id noch in der Queue vorhanden ist
+bool TetraLogic::isPendingSdsValid()
+{
+  if (pending_sds.id == 0) return false;  // nie initialisiert
+  return sdsQueue.find(pending_sds.id) != sdsQueue.end();
+}
 
 
 std::string TetraLogic::jsonToString(Json::Value eventmessage)
