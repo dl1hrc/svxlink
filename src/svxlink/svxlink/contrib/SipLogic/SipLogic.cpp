@@ -1043,6 +1043,7 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
 
   ss << "ringing \"" << caller << "\"";
   processLogicEvent(ss.str());
+  ss.str("");
   ss.clear();
 
   if (regexec(reject_incoming_regex, caller.c_str(), 0, 0, 0) == 0)
