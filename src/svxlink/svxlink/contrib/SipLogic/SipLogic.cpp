@@ -207,7 +207,7 @@ namespace sip {
   {
     public:
       _AudioMedia(SipLogic &logic, int frameTimeLength)
-        : slogic(logic)
+        : slogic(&logic)
       {
         createMediaPort(frameTimeLength);
         registerMediaPort(&mediaPort);
@@ -220,7 +220,7 @@ namespace sip {
 
 
     private:
-      SipLogic &slogic;
+      SipLogic *slogic;
       pjmedia_port mediaPort;
 
 
@@ -255,7 +255,7 @@ namespace sip {
                     << std::endl;
         }
 
-        mediaPort.port_data.pdata = &slogic;
+        mediaPort.port_data.pdata = slogic;
         mediaPort.get_frame = &callback_getFrame;
         mediaPort.put_frame = &callback_putFrame;
 
@@ -1069,22 +1069,44 @@ bool SipLogic::checkCaller(std::string caller)
 {
   if (ignore_reg)
   {
-    cout << "Do not check the credentials due to "
-         << "configuration (IGNORE_REGISTRATION=1)" << endl;
+    cout << "Do not check the credentials due to configuration "
+         << "(IGNORE_REGISTRATION=1)" << endl;
     return true;
   }
-
-  for (const auto& addr : dns.addresses())
+    // extract host from caller-URI
+  std::string callerHost = getCallerUri(caller);
+  if (callerHost.empty())
+    return false;
+    // 1. compare host name from URI == SIPSERVER from config
+  if (callerHost == m_sipserver)
+    return true;
+    // 2. compare against DNS-entry of the registrar
+    //    dns.addresses(): IPs for the SIP-server, got from startup
+  for (const auto& serverAddr : dns.addresses())
   {
-    if (!addr.isEmpty())
-    {
-      if (addr.toString() == getCallerUri(caller))
-      {
-        cout << "Accepting incoming call from" << caller << "." << endl;
-        return true;
-      }
-    }
+    if (serverAddr.isEmpty())
+      continue;
+      // Compare: Caller-URI host name == IP-Address of our SIP-servers?
+    if (callerHost == serverAddr.toString())
+      return true;
   }
+  // 3. callerHost is an IP address → direct compare of IP-addresses
+  //    example: callerHost = "192.168.1.10"
+  Async::IpAddress callerIp;
+  if (!callerIp.setIpFromString(callerHost))
+  {
+    // is not an ip address -> give up
+    return false;
+  }
+    // 4. callerHost is an IP address → compare with the DNS entry of our server
+  for (const auto& serverAddr : dns.addresses())
+  {
+    if (serverAddr.isEmpty())
+      continue;
+    if (callerIp.toString() == serverAddr.toString())
+      return true;
+  }
+    // Caller doesn't fit to our Sip server
   return false;
 } /* SipLogic::checkCaller */
 
