@@ -883,7 +883,15 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 SipLogic::~SipLogic(void)
 {
   startup_finished = false;
-  hangupAllCalls();   calls.clear();
+  hangupAllCalls();
+    // Step 1: release all Call-Objekts at heap
+  for (auto *call : calls)
+  {
+    delete call;
+  }
+    // Step 2: clear vektor
+  calls.clear();
+  
   m_call_timeout_timer.setEnable(false);
   if (accept_incoming_regex != 0)
   {
@@ -1009,7 +1017,7 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
 {
 
   // todo: accept more than just one call
-  if (calls.size() > 1) return;
+  if (calls.size() >= 1) return;
 
   stringstream ss;
   sip::_Call *call = new sip::_Call(*acc, iprm.callId);
