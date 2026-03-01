@@ -179,7 +179,7 @@ namespace sip {
       /**
        * Signal on an incoming message
        */
-      virtual void onInstandMessage(pj::OnInstantMessageParam &imprm)
+      virtual void onInstantMessage(pj::OnInstantMessageParam &imprm)
       {
         onMessage(this, imprm);
       }
