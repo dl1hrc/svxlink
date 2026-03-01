@@ -1178,13 +1178,17 @@ pj_status_t SipLogic::mediaPortGetFrame(pjmedia_port *port, pjmedia_frame *frame
 
   if ((got = m_ar->readSamples(smpl, count)) > 0)
   {
-    int i = 0;
-    for (float* s = smpl; s < smpl + sizeof(float)*got; s += sizeof(float))
+    for (int i = 0; i < got; i++)
     {
-      samples[i] = (pj_int16_t)(smpl[i] * 32768);
-      i++;
+      float v = smpl[i];
+      // security checks (NaN, Inf, etc.)
+      if (!std::isfinite(v)) v = 0.0f;
+      // limit for security
+      if (v > 1.0f) v = 1.0f;
+      if (v < -1.0f) v = -1.0f;
+      samples[i] = static_cast<pj_int16_t>(v * 32768.0f);
     }
-  }
+  } 
 
   delete [] smpl;
 
