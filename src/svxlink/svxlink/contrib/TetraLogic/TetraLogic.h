@@ -221,6 +221,10 @@ class TetraLogic : public Logic
       int direction;        // INCOMING, OUTGOING
       int nroftries = 0;    // number of tries
       int aiservice;        // AI service / type of service
+      int instance = 0;     // Sds instance
+      int state = 0;        // state of delivery (4||5)
+      int msgreference = 0; // message reference id
+      std::string pei_msg;  // Pei message
     };
 
     Sds pending_sds;        // the Sds that will actually be handled
@@ -339,7 +343,6 @@ class TetraLogic : public Logic
     float own_lat;
     float own_lon;
     std::string endCmd;
-    bool new_sds;
     int last_sdsinstance;
     bool inTransmission;
     bool cmgs_received;
@@ -406,8 +409,7 @@ class TetraLogic : public Logic
     void handleCallReleased(std::string m_message);
     int queueSds(Sds t_sds);
     void firstContact(Sds tsds);
-    bool checkSds(void);
-    void clearOldSds(void);
+    void checkSds(void);
     int getAiMode(std::string opmode);
     bool rmatch(std::string tok, std::string pattern);
     void sendUserInfo(void);
@@ -438,7 +440,6 @@ class TetraLogic : public Logic
     bool getConfigValue(const std::string& section,
          const std::string& tag, std::string& value);
     std::string jsonToString(Json::Value eventmessage);
-    bool isPendingSdsValid();
     void dummy(const std::string& info);
 };  /* class TetraLogic */
 

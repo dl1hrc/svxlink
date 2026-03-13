@@ -663,7 +663,7 @@ void DapNetClient::handleDapText(std::string msg)
     {
       // *it is one line from Ric2Rubrics
       SvxLink::splitStr(rubricList, it->second, ",");
-      unsigned int rubric;
+      unsigned int rubric = 0;
       for(StrList::const_iterator rl=rubricList.begin(); rl!=rubricList.end(); rl++)
       {
         // *rl is one rubric
