@@ -6,7 +6,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -160,6 +160,14 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 
 #if GPIOD_VERSION_MAJOR >= 2
   m_chip = gpiod_chip_open(chip.c_str());
+  if ((m_chip == nullptr) &&
+      (chip.find('/') == std::string::npos) &&
+      (chip.rfind("gpiochip", 0) == 0))
+  {
+    // Fallback: allow gpiochipX to mean /dev/gpiochipX
+    std::string devpath = "/dev/" + chip;
+    m_chip = gpiod_chip_open(devpath.c_str());
+  }
 #else
   m_chip = gpiod_chip_open_lookup(chip.c_str());
 #endif
