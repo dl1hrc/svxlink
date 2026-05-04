@@ -1,4 +1,4 @@
-.TH SVXLINK.CONF 5 "FEBRUARY 2026" Linux "File Formats"
+.TH SVXLINK.CONF 5 "MAY 2026" Linux "File Formats"
 .
 .SH NAME
 .
@@ -1459,10 +1459,9 @@ operation is desired, prefix the pin name with an exclamation mark (!).
 Example: GPIO_SQL_PIN=!gpio4
 .TP
 .B SQL_GPIOD_CHIP
-The GPIO chip to use for squelch. The application tries to figure out whether
-the value is the path to the GPIO chip, its name, label or number.
+The path to the GPIO chip device node to use for squelch.
 
-Example: SQL_GPIOD_CHIP=gpiochip0
+Example: SQL_GPIOD_CHIP=/dev/gpiochip0
 .TP
 .B SQL_GPIOD_LINE
 If GPIOD was specified in SQL_DET, set this config variable to the gpiod line
@@ -2371,10 +2370,9 @@ GPIO.  This normally is /sys/class/gpio but on some hardware, like the Orange
 Pi, the path is /sys/class/gpio_sw.
 .TP
 .B PTT_GPIOD_CHIP
-The GPIO chip to use for PTT. The application tries to figure out whether the
-value is the path to the GPIO chip, its name, label or number.
+The path to the GPIO chip device node to use for PTT.
 
-Example: PTT_GPIOD_CHIP=gpiochip0
+Example: PTT_GPIOD_CHIP=/dev/gpiochip0
 .TP
 .B PTT_GPIOD_LINE
 If GPIOD was specified in PTT_TYPE, set this config variable to the gpiod line
