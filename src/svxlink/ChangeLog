@@ -82,6 +82,14 @@
 * New reflector server talkgroup configuration, ALLOW_MONITOR, to set which
   callsigns are allowed to monitor a specific talkgroup.
 
+* SvxReflector Bugfix: Certificates that had passed their renewal time, but
+  was still valid, was never sent to a client.
+
+* Improved HIDRAW code
+  The HIDRAW squelch and PTT code have been made more resiliant so that it
+  can handle a device that disappear and then comes back. Previously it
+  would flood the log with error messages and never recover.
+
 
 
  1.9.1 -- 01 Jul 2025
