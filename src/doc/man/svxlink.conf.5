@@ -1,4 +1,4 @@
-.TH SVXLINK.CONF 5 "OCTOBER 2025" Linux "File Formats"
+.TH SVXLINK.CONF 5 "MAY 2026" Linux "File Formats"
 .
 .SH NAME
 .
@@ -437,6 +437,34 @@ If the squelch close before the delay time has expired, no talkgroup will be
 reported. Default: 0.
 
 Example: CTCSS_TO_TG_DELAY=1000
+.TP
+.B COMMAND_PTY
+Using this configuration variable it is possible to specify a path to a UNIX 98
+PTY that can be used to send commands to a SvxLink logic core. SvxLink will
+create a softlink to the actual slave PTY. For that reason, SvxLink must have
+write permissions in the directory where the softlink should be created.
+Sending commands to the PTY is as simple as doing a
+.B "echo 'THE COMMAND TO EXECUTE' > /path/to/pty"
+after starting SvxLink.
+
+Valid commands:
+.RS
+.IP \(bu 4
+.BR "CFG <section> <tag> <value>" " --"
+Set a configuration variable. Only a few configuration variables support being
+set at runtime. Example: CFG RepeaterLogic ONLINE 0.
+.IP \(bu 4
+.BR "EVENT <event name> [<arg> ...]" " --"
+Call an event handler (TCL function). It is important to specify the correct
+TCL namespace for the function to be found. If no namespace is given, the
+namespace of the current logic core will be added, e.g. "manual_identification"
+is the same as "RepeaterLogic::manual_identification" if the logic core
+namnespace is "RepeaterLogic". To call a function in the root namespace, the
+function name must be prepended with "::".
+Example: EVENT ::playNumber -42.5.
+.RE
+
+Example: COMMAND_PTY=/dev/shm/repeater_logic_ctrl
 .
 .SS Simplex Logic Section
 .
@@ -470,34 +498,6 @@ is open.
 .B RGR_SOUND_ALWAYS
 Set to 1 to always send roger sound after squelch close, even when no module is
 active.
-.TP
-.B COMMAND_PTY
-Using this configuration variable it is possible to specify a path to a UNIX 98
-PTY that can be used to send commands to a SvxLink logic core. SvxLink will
-create a softlink to the actual slave PTY. For that reason, SvxLink must have
-write permissions in the directory where the softlink should be created.
-Sending commands to the PTY is as simple as doing a
-.B "echo 'THE COMMAND TO EXECUTE' > /path/to/pty"
-after starting SvxLink.
-
-Valid commands:
-.RS
-.IP \(bu 4
-.BR "CFG <section> <tag> <value>" " --"
-Set a configuration variable. Only a few configuration variables support being
-set at runtime. Example: CFG RepeaterLogic ONLINE 0.
-.IP \(bu 4
-.BR "EVENT <event name> [<arg> ...]" " --"
-Call an event handler (TCL function). It is important to specify the correct
-TCL namespace for the function to be found. If no namespace is given, the
-namespace of the current logic core will be added, e.g. "manual_identification"
-is the same as "RepeaterLogic::manual_identification" if the logic core
-namnespace is "RepeaterLogic". To call a function in the root namespace, the
-function name must be prepended with "::".
-Example: EVENT ::playNumber -42.5.
-.RE
-
-Example: COMMAND_PTY=/dev/shm/repeater_logic_ctrl
 .
 .SS Repeater Logic Section
 .
@@ -1459,10 +1459,9 @@ operation is desired, prefix the pin name with an exclamation mark (!).
 Example: GPIO_SQL_PIN=!gpio4
 .TP
 .B SQL_GPIOD_CHIP
-The GPIO chip to use for squelch. The application tries to figure out whether
-the value is the path to the GPIO chip, its name, label or number.
+The path to the GPIO chip device node to use for squelch.
 
-Example: SQL_GPIOD_CHIP=gpiochip0
+Example: SQL_GPIOD_CHIP=/dev/gpiochip0
 .TP
 .B SQL_GPIOD_LINE
 If GPIOD was specified in SQL_DET, set this config variable to the gpiod line
@@ -2362,10 +2361,9 @@ GPIO.  This normally is /sys/class/gpio but on some hardware, like the Orange
 Pi, the path is /sys/class/gpio_sw.
 .TP
 .B PTT_GPIOD_CHIP
-The GPIO chip to use for PTT. The application tries to figure out whether the
-value is the path to the GPIO chip, its name, label or number.
+The path to the GPIO chip device node to use for PTT.
 
-Example: PTT_GPIOD_CHIP=gpiochip0
+Example: PTT_GPIOD_CHIP=/dev/gpiochip0
 .TP
 .B PTT_GPIOD_LINE
 If GPIOD was specified in PTT_TYPE, set this config variable to the gpiod line
