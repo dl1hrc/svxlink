@@ -1935,7 +1935,8 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   }
 
   std::ostringstream ss;
-  ss << "talker_start " << msg.tg() << " " << msg.callsign();
+  ss << "talker_start " << msg.tg() << " "
+     << EventHandler::tclSafeCallsign(msg.callsign());
   processEvent(ss.str());
 
   Json::Value event(Json::objectValue);
@@ -1959,7 +1960,8 @@ void ReflectorLogic::handleMsgTalkerStop(std::istream& is)
        << msg.callsign() << endl;
 
   std::ostringstream ss;
-  ss << "talker_stop " << msg.tg() << " " << msg.callsign();
+  ss << "talker_stop " << msg.tg() << " "
+     << EventHandler::tclSafeCallsign(msg.callsign());
   processEvent(ss.str());
 } /* ReflectorLogic::handleMsgTalkerStop */
 
