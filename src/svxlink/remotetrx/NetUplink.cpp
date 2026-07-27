@@ -297,19 +297,20 @@ void NetUplink::handleIncomingConnection(TcpConnection *incoming_con)
   
   setState(STATE_CON_SETUP);
 
-  MsgProtoVer *ver_msg = new MsgProtoVer;
-  sendMsg(ver_msg);
-  
+  sendMsg(MsgProtoVer());
+
   if (auth_key.empty())
   {
-    MsgAuthOk *auth_msg = new MsgAuthOk;
-    sendMsg(auth_msg);
+    std::cerr << "*** WARNING: Using an empty AUTH_KEY will allow anyone to "
+                 "connect"
+              << std::endl;
+    sendMsg(MsgAuthOk());
     setState(STATE_READY);
   }
   else
   {
-    MsgAuthChallenge *auth_msg = new MsgAuthChallenge;
-    memcpy(auth_challenge, auth_msg->challenge(),
+    MsgAuthChallenge auth_msg;
+    memcpy(auth_challenge, auth_msg.challenge(),
            MsgAuthChallenge::CHALLENGE_LEN);
     sendMsg(auth_msg);
   }
@@ -391,12 +392,8 @@ void NetUplink::clientDisconnected(TcpConnection *the_con,
 
 int NetUplink::tcpDataReceived(TcpConnection *con, void *data, int size)
 {
-  //cout << "NetRx::tcpDataReceived: size=" << size << endl;
-  
-  //Msg *msg = reinterpret_cast<Msg*>(data);
-  //cout << "Received a TCP message with type " << msg->type()
-  //     << " and size " << msg->size() << endl;
-  
+  //std::cout << "NetRx::tcpDataReceived: size=" << size << std::endl;
+
     // Discard data if we are not in one of the "connected" states
   if ((state != STATE_CON_SETUP) && (state != STATE_READY))
   {
@@ -489,8 +486,7 @@ void NetUplink::handleMsg(Msg *msg)
         }
         else
         {
-          MsgAuthOk *ok_msg = new MsgAuthOk;
-          sendMsg(ok_msg);
+          sendMsg(MsgAuthOk());
         }
         setState(STATE_READY);
       }
@@ -663,7 +659,18 @@ void NetUplink::handleMsg(Msg *msg)
       if (!tx_muted && (audio_dec != 0))
       {
         MsgAudio *audio_msg = reinterpret_cast<MsgAudio*>(msg);
-        audio_dec->writeEncodedSamples(audio_msg->buf(), audio_msg->size());
+        int audio_size = audio_msg->size();
+          // Reject a payload length that is out of range or inconsistent with
+          // the number of bytes actually received for this message, otherwise
+          // the decoder would read past the receive buffer.
+        if ((audio_size < 0) || (audio_size > MsgAudio::BUFSIZE) ||
+            (msg->size() != sizeof(Msg) + sizeof(int) + audio_size))
+        {
+          std::cerr << "*** ERROR: Invalid MsgAudio size received. Ignoring."
+                    << std::endl;
+          break;
+        }
+        audio_dec->writeEncodedSamples(audio_msg->buf(), audio_size);
       }
       break;
     }
@@ -715,27 +722,24 @@ void NetUplink::handleMsg(Msg *msg)
 } /* NetUplink::handleMsg */
 
 
-void NetUplink::sendMsg(Msg *msg)
+void NetUplink::sendMsg(const Msg& msg)
 {
   if ((state == STATE_CON_SETUP) || (state == STATE_READY))
   {
-    int written = con->write(msg, msg->size());
+    int written = con->write(&msg, msg.size());
     if (written == -1)
     {
       std::cerr << "*** ERROR: TCP transmit error in NetUplink \"" << name
                 << "\": " << strerror(errno) << "." << std::endl;
       forceDisconnect();
     }
-    else if (written != static_cast<int>(msg->size()))
+    else if (written != static_cast<int>(msg.size()))
     {
       std::cerr << "*** ERROR: TCP transmit buffer overflow in NetUplink "
                 << name << "." << std::endl;
       forceDisconnect();
     }
   }
-  
-  delete msg;
-  
 } /* NetUplink::sendMsg */
 
 
@@ -754,9 +758,8 @@ void NetUplink::squelchOpen(bool is_open)
     }
   }
 
-  MsgSquelch *msg = new MsgSquelch(is_open, rx->signalStrength(),
-                                   rx->sqlRxId(), rx->squelchActivityInfo());
-  sendMsg(msg);
+  sendMsg(MsgSquelch(is_open, rx->signalStrength(), rx->sqlRxId(),
+                     rx->squelchActivityInfo()));
 } /* NetUplink::squelchOpen */
 
 
@@ -764,24 +767,21 @@ void NetUplink::dtmfDigitDetected(char digit, int duration)
 {
   cout << name << ": DTMF digit detected: " << digit << " with duration " << duration
        << " milliseconds" << endl;
-  MsgDtmf *msg = new MsgDtmf(digit, duration);
-  sendMsg(msg);
+  sendMsg(MsgDtmf(digit, duration));
 } /* NetUplink::dtmfDigitDetected */
 
 
 void NetUplink::toneDetected(float tone_fq)
 {
   cout << name << ": Tone detected: " << tone_fq << endl;
-  MsgTone *msg = new MsgTone(tone_fq);
-  sendMsg(msg);
+  sendMsg(MsgTone(tone_fq));
 } /* NetUplink::toneDetected */
 
 
 void NetUplink::selcallSequenceDetected(std::string sequence)
 {
   // cout "Sel5 sequence detected: " << sequence << endl;
-  MsgSel5 *msg = new MsgSel5(sequence);
-  sendMsg(msg);
+  sendMsg(MsgSel5(sequence));
 } /* NetUplink::selcallSequenceDetected */
 
 
@@ -793,8 +793,7 @@ void NetUplink::writeEncodedSamples(const void *buf, int size)
   {
     const int bufsize = MsgAudio::BUFSIZE;
     int len = min(size, bufsize);
-    MsgAudio *msg = new MsgAudio(ptr, len);
-    sendMsg(msg);
+    sendMsg(MsgAudio(ptr, len));
     size -= len;
     ptr += len;
   }
@@ -803,31 +802,26 @@ void NetUplink::writeEncodedSamples(const void *buf, int size)
 
 void NetUplink::txTimeout(void)
 {
-  MsgTxTimeout *msg = new MsgTxTimeout;
-  sendMsg(msg);
+  sendMsg(MsgTxTimeout());
 } /* NetUplink::txTimeout */
 
 
 void NetUplink::transmitterStateChange(bool is_transmitting)
 {
-  MsgTransmitterStateChange *msg =
-      new MsgTransmitterStateChange(is_transmitting);
-  sendMsg(msg);
+  sendMsg(MsgTransmitterStateChange(is_transmitting));
 } /* NetUplink::transmitterStateChange */
 
 
 void NetUplink::allEncodedSamplesFlushed(void)
 {
-  MsgAllSamplesFlushed *msg = new MsgAllSamplesFlushed;
-  sendMsg(msg);
+  sendMsg(MsgAllSamplesFlushed());
 } /* NetUplink::allEncodedSamplesFlushed */
 
 
 void NetUplink::heartbeat(Timer *t)
 {
-  MsgHeartbeat *msg = new MsgHeartbeat;
-  sendMsg(msg);
-  
+  sendMsg(MsgHeartbeat());
+
   struct timeval diff_tv;
   struct timeval now;
   gettimeofday(&now, NULL);
@@ -883,9 +877,7 @@ void NetUplink::setFallbackActive(bool activate)
 
 void NetUplink::signalLevelUpdated(float siglev)
 {
-  MsgSiglevUpdate *msg = new MsgSiglevUpdate(rx->signalStrength(),
-					     rx->sqlRxId());
-  sendMsg(msg);  
+  sendMsg(MsgSiglevUpdate(rx->signalStrength(), rx->sqlRxId()));
 } /* NetUplink::signalLevelUpdated */
 
 
