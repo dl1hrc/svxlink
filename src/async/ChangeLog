@@ -1,4 +1,29 @@
- 1.9.0 -- ?? ??? ????
+ 1.10.0 -- ?? ??? ????
+-----------------------
+
+* New SslX509::toText and SslCertSigningReq::toText functions that return a
+  verbose, human readable dump of the certificate/CSR.
+
+* New SslX509::subjectAltName function.
+
+* HttpServerConnection: Added reason phrases for status codes 400, 405 and 500.
+
+
+
+ 1.9.1 -- 26 Jul 2026
+----------------------
+
+* Security: Async HTTP server: unbounded request-line/header accumulation may
+  lead to memory-exhaustion DoS.
+  Credit: Mark Rose <markrose@markrose.ca>
+
+* Security: Audio decoders: attacker-sized stack VLA from encoded-frame
+  length → stack exhaustion (network) lead to memory-exhaustion DoS.
+  Credit: Mark Rose <markrose@markrose.ca>
+
+
+
+ 1.9.0 -- 23 May 2026
 ----------------------
 
 * Async::AudioStreamStateDetector facelift
