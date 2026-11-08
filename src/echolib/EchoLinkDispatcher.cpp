@@ -11,7 +11,7 @@ to indicate that an incoming connection is on its way.
 
 \verbatim
 EchoLib - A library for EchoLink communication
-Copyright (C) 2003-2014 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -334,13 +334,17 @@ void Dispatcher::ctrlDataReceived(const IpAddress& ip, uint16_t port,
     if(isRTCPSdespacket(recv_buf, len)) // May be an incoming connection
     {
       char remote_id[256];
-      if(parseSDES(remote_id, recv_buf, RTCP_SDES_NAME))
+      if(parseSDES(remote_id, recv_buf, len, RTCP_SDES_NAME))
       {
 	//printData(remote_id, strlen(remote_id));
 	char strtok_buf[256];
 	char *strtok_buf_ptr = strtok_buf;
 	char *remote_call = strtok_r(remote_id, " \t\n\r", &strtok_buf_ptr);
 	const char *remote_name = strtok_r(NULL, " \t\n\r", &strtok_buf_ptr);
+	if (remote_call != 0)
+	{
+	  sanitizeCallsign(remote_call);
+	}
 	if ((remote_call != 0) && (remote_call[0] != 0))
 	{
 	  if (remote_name == 0)
@@ -348,7 +352,7 @@ void Dispatcher::ctrlDataReceived(const IpAddress& ip, uint16_t port,
 	    remote_name = "";
 	  }
 	  char priv[256];
-	  parseSDES(priv, recv_buf, RTCP_SDES_PRIV);
+	  parseSDES(priv, recv_buf, len, RTCP_SDES_PRIV);
 	  incomingConnection(ip, remote_call, remote_name, priv);
 	}
       }
