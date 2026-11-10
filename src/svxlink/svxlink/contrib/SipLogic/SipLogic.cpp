@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <sigc++/sigc++.h>
 #include <pjlib.h>
 #include <pjsua-lib/pjsua.h>
+#include <pjsua2.hpp>
 
 
 /****************************************************************************
@@ -91,7 +92,7 @@ using namespace pj;
  *
  ****************************************************************************/
 #define DEFAULT_SIPLIMITER_THRESH  -1.0
-#define PJSIP_VERSION "01032026"
+#define PJSIP_VERSION "10112026"
 
 
 /****************************************************************************
@@ -207,21 +208,65 @@ namespace sip {
   {
     public:
       _AudioMedia(SipLogic &logic, int frameTimeLength)
-        : slogic(&logic)
+        : slogic(&logic), portRegistered(false), poolInitialized(false)
       {
+          // Own pool, so its lifetime is under our control. The deprecated
+          // registerMediaPort() kept a private pool inside AudioMedia whose
+          // lifetime we could not influence - that pool was released while
+          // an asynchronous unregister was still pending.
+        pj_caching_pool_init(&mediaCachingPool, &pj_pool_factory_default_policy, 0);
+        poolInitialized = true;
+        mediaPool = pj_pool_create(&mediaCachingPool.factory, "SipLogicMedia",
+                                   4000, 4000, NULL);
         createMediaPort(frameTimeLength);
-        registerMediaPort(&mediaPort);
+        registerMediaPort2(&mediaPort, mediaPool);
+        portRegistered = true;
       }
 
       ~_AudioMedia()
       {
-        unregisterMediaPort();
+        unregisterPort();
+        if (poolInitialized)
+        {
+          pj_caching_pool_destroy(&mediaCachingPool);
+          poolInitialized = false;
+        }
       }
+
+      /**
+       * @brief  Detach the port from conference bridge and endpoint
+       *
+       * Called while pjsua is still alive, normally when the call is torn
+       * down. Idempotent: a second call does nothing.
+       */
+      void unregisterPort(void)
+      {
+        if (!portRegistered)
+        {
+          return;
+        }
+        try
+        {
+          unregisterMediaPort();
+        }
+        catch (pj::Error &err)
+        {
+          std::cout << "*** WARNING: unregisterMediaPort failed: "
+                    << err.info() << std::endl;
+        }
+        portRegistered = false;
+      }
+
+      bool isPortRegistered(void) const { return portRegistered; }
 
 
     private:
       SipLogic *slogic;
       pjmedia_port mediaPort;
+      pj_caching_pool mediaCachingPool;
+      pj_pool_t *mediaPool;
+      bool portRegistered;
+      bool poolInitialized;
 
 
       static pj_status_t callback_getFrame(pjmedia_port *port, pjmedia_frame *frame)
@@ -315,7 +360,8 @@ SipLogic::SipLogic(void)
     logic_msg_handler(0), logic_event_handler(0), report_events_as_idle(false),
     startup_finished(false), logicselector(0), semi_duplex(false),
     sip_preamp_gain(0), m_autoconnect(""), sip_event_handler(0), 
-    sip_msg_handler(0), sipselector(0), m_siploglevel(0), ignore_reg(false)
+    sip_msg_handler(0), sipselector(0), m_siploglevel(0), ignore_reg(false),
+    ep_initialized(false)
 {
   m_call_timeout_timer.expired.connect(
       mem_fun(*this, &SipLogic::callTimeout));
@@ -334,6 +380,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   if (!LogicBase::initialize(cfgobj, logic_name))
   {
     cout << name() << ":*** ERROR initializing SipLogic." << endl;
+    cleanup();
     return false;
   }
 
@@ -342,6 +389,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: " << name() << "/USERNAME missing in configuration"
          << endl;
+    cleanup();
     return false;
   }
 
@@ -350,6 +398,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: " << name() << "/PASSWORD missing in configuration"
          << endl;
+    cleanup();
     return false;
   }
 
@@ -357,6 +406,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: " << name() << "/SIPSERVER missing in configuration"
          << endl;
+    cleanup();
     return false;
   }
 
@@ -365,6 +415,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: " << name() << "/SIPEXTENSION missing in configuration"
          << endl;
+    cleanup();
     return false;
   }
 
@@ -373,6 +424,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: " << name() << "/SIPSCHEMA missing in configuration"
          << endl;
+    cleanup();
     return false;
   }
 
@@ -401,6 +453,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
       cerr << "*** ERROR: Could not open dtmf sip PTY " << dtmf_ctrl_pty_path
            << " as specified in configuration variable " << name()
            << "/" << "SIP_CTRL_PTY" << endl;
+      cleanup();
       return false;
     }
     dtmf_ctrl_pty->dataReceived.connect(
@@ -430,7 +483,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   cfg().getValue(name(), "CALLERNAME", m_callername);
 
   cfg().getValue(name(), "SIP_LOGLEVEL", m_siploglevel); // 0-6
-  if (m_siploglevel < 0 || m_siploglevel > 6) m_siploglevel = 3;
+  if (m_siploglevel > 6) m_siploglevel = 3;
 
   uint16_t m_reg_timeout = 300;
   cfg().getValue(name(), "REG_TIMEOUT", m_reg_timeout);
@@ -447,18 +500,20 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
     value = "^.*$";
   }
   accept_incoming_regex = new regex_t;
-  size_t err_size = 0;
-  ((void)(err_size)); // Suppress warning about unused variable
+
   int err = regcomp(accept_incoming_regex, value.c_str(),
                 REG_EXTENDED | REG_NOSUB | REG_ICASE);
   if (err != 0)
   {
     size_t msg_size = regerror(err, accept_incoming_regex, 0, 0);
-    char msg[msg_size];
-    err_size = regerror(err, accept_incoming_regex, msg, msg_size);
-    assert(err_size == msg_size);
+    std::vector<char> msg(msg_size);
+    regerror(err, accept_incoming_regex, &msg[0], msg_size);
     cerr << "*** ERROR: Syntax error in " << name() << "/ACCEPT_INCOMING: "
-         << msg << endl;
+         << &msg[0] << endl;
+    regfree(accept_incoming_regex);
+    delete accept_incoming_regex;
+    accept_incoming_regex = 0;
+    cleanup();
     return false;
   }
 
@@ -472,11 +527,14 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   if (err != 0)
   {
     size_t msg_size = regerror(err, reject_incoming_regex, 0, 0);
-    char msg[msg_size];
-    err_size = regerror(err, reject_incoming_regex, msg, msg_size);
-    assert(err_size == msg_size);
+    std::vector<char> msg(msg_size);
+    regerror(err, reject_incoming_regex, &msg[0], msg_size);
     cerr << "*** ERROR: Syntax error in " << name() << "/REJECT_INCOMING: "
-         << msg << endl;
+         << &msg[0] << endl;
+    regfree(reject_incoming_regex);
+    delete reject_incoming_regex;
+    reject_incoming_regex = 0;
+    cleanup();
     return false;
   }
 
@@ -490,11 +548,14 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   if (err != 0)
   {
     size_t msg_size = regerror(err, accept_outgoing_regex, 0, 0);
-    char msg[msg_size];
-    err_size = regerror(err, accept_outgoing_regex, msg, msg_size);
-    assert(err_size == msg_size);
+    std::vector<char> msg(msg_size);
+    regerror(err, accept_outgoing_regex, &msg[0], msg_size);
     cerr << "*** ERROR: Syntax error in " << name() << "/ACCEPT_OUTGOING: "
-         << msg << endl;
+         << &msg[0] << endl;
+    regfree(accept_outgoing_regex);
+    delete accept_outgoing_regex;
+    accept_outgoing_regex = 0;
+    cleanup();
     return false;
   }
 
@@ -508,11 +569,14 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   if (err != 0)
   {
     size_t msg_size = regerror(err, reject_outgoing_regex, 0, 0);
-    char msg[msg_size];
-    err_size = regerror(err, reject_outgoing_regex, msg, msg_size);
-    assert(err_size == msg_size);
+    std::vector<char> msg(msg_size);
+    regerror(err, reject_outgoing_regex, &msg[0], msg_size);
     cerr << "*** ERROR: Syntax error in " << name() << "/REJECT_OUTGOING: "
-         << msg << endl;
+         << &msg[0] << endl;
+    regfree(reject_outgoing_regex);
+    delete reject_outgoing_regex;
+    reject_outgoing_regex = 0;
+    cleanup();
     return false;
   }
 
@@ -551,6 +615,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   } catch (Error& err) {
     cout << "*** ERROR creating Sip transport layer in "
          << name() << endl;
+    cleanup();
     return false;
   }
 
@@ -571,9 +636,11 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
       ep.transportCreate(PJSIP_TRANSPORT_UDP, tcfg);
     }
     ep.libStart();
+    ep_initialized = true;
   } catch (Error& err) {
     cout << "*** ERROR creating transport layer in "
          << name() << endl;
+    cleanup();
     return false;
   }
 
@@ -602,6 +669,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   } catch (Error& err) {
     cout << ":*** ERROR creating account: "
          << acc_cfg.idUri << " in " << name() << endl;
+    cleanup();
     return false;
   }
 
@@ -702,9 +770,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
     {
       cerr << name() << ":*** ERROR: Squelch detector initialization failed"
            << endl;
-      delete squelch_det;
-      squelch_det = 0;
-      // FIXME: Cleanup
+      cleanup();
       return false;
     }
     if (cfg().getValue(name(), "SQL_HANGTIME", sql_hangtime))
@@ -745,6 +811,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cerr << "*** ERROR: Config variable " << name() << "/EVENT_HANDLER is empty."
          << endl;
+    cleanup();
     return false;
   }
   logic_event_handler = new EventHandler(event_handler_str, name());
@@ -785,6 +852,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cout << name() << ":*** ERROR initializing Logic eventhandler in SipLogic."
          << endl;
+    cleanup();
     return false;
   }
 
@@ -825,6 +893,7 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   {
     cout << name() << ":*** ERROR initializing Sip eventhandler in SipLogic."
          << endl;
+    cleanup();
     return false;
   }
 
@@ -882,7 +951,6 @@ bool SipLogic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 
 SipLogic::~SipLogic(void)
 {
-  startup_finished = false;
   hangupAllCalls();
     // Step 1: release all Call-Objekts at heap
   for (auto *call : calls)
@@ -891,8 +959,25 @@ SipLogic::~SipLogic(void)
   }
     // Step 2: clear vektor
   calls.clear();
-  
+  cleanup();
+} /* SipLogic::~Siplogic */
+
+/**
+ * @brief  Release every resource acquired by initialize()
+ *
+ * Safe to call at any point, including on a partially initialized object,
+ * and safe to call more than once. Every handle is null-checked before it
+ * is released and reset to 0 afterwards, so a second call is a no-op.
+ *
+ * The order matters: sinks (valves, selectors) are torn down before their
+ * upstream sources, so that no deregistration reaches into an object that
+ * has already been destroyed.
+ */
+
+void SipLogic::cleanup(void)
+{
   m_call_timeout_timer.setEnable(false);
+
   if (accept_incoming_regex != 0)
   {
     regfree(accept_incoming_regex);
@@ -917,18 +1002,44 @@ SipLogic::~SipLogic(void)
     delete reject_outgoing_regex;
     reject_outgoing_regex = 0;
   }
+
+    // Safety net: if a call was still active, the port may not have been
+    // detached yet. Detach it here while the library is still running.
+  if (media != 0)
+  {
+    media->unregisterPort();
+  }
   delete media;           media = 0;
   delete acc;             acc = 0;
+  delete squelch_det; squelch_det = 0;
+
+  // Valves and selectors first, then upstream sources
+  delete m_infrom_sip;    m_infrom_sip = 0;
+  delete m_outto_sip;     m_outto_sip = 0;
+  delete logicselector;   logicselector = 0;
+  delete sipselector;     sipselector = 0;
+  delete m_logic_con_out; m_logic_con_out = 0;
+
+  delete m_ar;            m_ar = 0;
   delete m_logic_con_in;  m_logic_con_in = 0;
   delete m_out_src;       m_out_src = 0;
   delete dtmf_ctrl_pty;   dtmf_ctrl_pty = 0;
-  delete m_ar;            m_ar = 0;
   delete logic_event_handler;  logic_event_handler = 0;
   delete sip_event_handler;    sip_event_handler = 0;
   delete logic_msg_handler;    logic_msg_handler = 0;
   delete sip_msg_handler;      sip_msg_handler = 0;
-  delete logicselector;        logicselector = 0;
-} /* SipLogic::~SipLogic */
+
+    // pjsua must be torn down explicitly, before the Endpoint member is
+    // destroyed implicitly. Otherwise ~pj::Endpoint runs pjsua_destroy2()
+    // after the account and media objects are gone, and the transaction
+    // layer lock is decremented below zero.
+  if (ep_initialized)
+  {
+    ep.libDestroy();
+    ep_initialized = false;
+  }
+  startup_finished = false;
+} /* SipLogic::cleanup */
 
 
 std::string SipLogic::initCallHandler(int argc, const char* argv[])
@@ -1009,6 +1120,8 @@ void SipLogic::makeCall(sip::_Account *acc, std::string dest_uri)
     m_call_timeout_timer.setEnable(true);
   } catch (Error& err) {
     cout << name() << ": *** ERROR: " << err.info() << endl;
+      // Up to here the call is not in calls[] yet - release it
+    delete call;
   }
 } /* SipLogic::makeCall */
 
@@ -1034,6 +1147,7 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
          << ")" << endl;
     ss << "invalid_call " << ci.remoteUri;
     processLogicEvent(ss.str());
+    delete call;
     return;
   }
 
@@ -1058,6 +1172,7 @@ void SipLogic::onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm)
   {
     ss << "reject_incoming_call \"" << caller << "\"";
     processSipEvent(ss.str());
+    delete call; // call not registered
     return;
   }
 
@@ -1609,15 +1724,42 @@ void SipLogic::unregisterCall(sip::_Call *call)
 {
   if (!call)
      return;
+
+  bool found = false;
+
     // Call aus der Liste entfernen
   for (auto it = calls.begin(); it != calls.end(); ++it)
   {
     if (*it == call)
     {
       calls.erase(it);
+      found = true;
       break;
     }
   }
+
+  if (!found)
+  {
+    return;
+  }
+
+    // Stop the media transfer and detach the port while pjsua is still
+    // alive. Doing this here instead of at shutdown means the asynchronous
+    // unregister operation has completed long before libDestroy() runs.
+  if (sip_buf != 0 && media != 0)
+  {
+    try
+    {
+      sip_buf->stopTransmit(*media);
+      media->stopTransmit(*sip_buf);
+    }
+    catch (pj::Error &err)
+    {
+    }
+    sip_buf = 0;
+    media->unregisterPort();
+  }
+
     // WICHTIG:
     // sip::_Call ist sigc::trackable
     // → beim Löschen werden automatisch ALLE Signalverbindungen getrennt

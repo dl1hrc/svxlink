@@ -86,6 +86,24 @@ namespace sip
   class _Account;
   class _Call;
   class _AudioMedia;
+
+    /**
+     * Endpoint subclass that reports completion of asynchronous audio
+     * media operations. Needed because registerMediaPort2() and
+     * unregisterMediaPort() do not run synchronously.
+     */
+  class _Endpoint : public pj::Endpoint
+  {
+    public:
+      _Endpoint(void) : lastOpDone(false) {}
+
+      virtual void onAudioMediaOpCompleted(pj::OnAudioMediaOpCompletedParam &prm)
+      {
+        lastOpDone = true;
+      }
+
+      bool lastOpDone;
+  };
 };
 namespace Async
 {
@@ -188,7 +206,7 @@ class SipLogic : public LogicBase
     Async::Timer              m_call_timeout_timer;
     sip::_AudioMedia          *media;
     Squelch   	      	      *squelch_det;
-    pj::Endpoint               ep;
+    sip::_Endpoint             ep;
     regex_t   	         	  *accept_incoming_regex;
     regex_t                   *reject_incoming_regex;
     regex_t   	         	  *accept_outgoing_regex;
@@ -208,13 +226,14 @@ class SipLogic : public LogicBase
     uint16_t                  m_siploglevel;
     Async::DnsLookup          dns;
     bool                      ignore_reg;
+    bool                      ep_initialized;
 
     SipLogic(const SipLogic&);
     SipLogic& operator=(const SipLogic&);
     void makeCall(sip::_Account *acc, std::string dest_uri);
     void onIncomingCall(sip::_Account *acc, pj::OnIncomingCallParam &iprm);
     void onRegState(sip::_Account *acc, pj::OnRegStateParam &prm);
-    bool setAudioCodec(const std::string& codec_name);
+    //bool setAudioCodec(const std::string& codec_name);
     void onDtmfDigit(sip::_Call *call, pj::OnDtmfDigitParam &prm);
     void onCallState(sip::_Call *call, pj::OnCallStateParam &prm);
     void onMessageInfo(sip::_Call *call, pj::OnInstantMessageParam &prm);
@@ -232,6 +251,7 @@ class SipLogic : public LogicBase
     void onSquelchOpen(bool is_open);
     void unregisterCall(sip::_Call *call);
     void hangupAllCalls(void);
+    void cleanup(void);
     std::string getCallerUri(std::string uri);
     bool checkCaller(std::string caller);
     void onDnsResultsReady(Async::DnsLookup& dns_result);

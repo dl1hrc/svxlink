@@ -1,0 +1,82 @@
+Changes 10112026
+
+Cleanup infrastructure
+• Added a private cleanup() method that releases every resource acquired by 
+  initialize(), is safe to call repeatedly, and null-checks each handle before
+  releasing it.
+• Replaced the inline teardown block in ~SipLogic with a single call to 
+  cleanup(), keeping the sip::Call deletion and vector clear in the destructor.
+• Converted all 18 error exits in initialize() to call cleanup(); return false; 
+  so no failure path leaks resources.
+• Ordered the releases in cleanup() so sinks (valves, selectors) are torn down 
+  before their upstream sources.
+• Moved the startupfinished = false; reset into cleanup() so it also applies 
+  when initialize() aborts.
+
+Previously missing releases
+• Added delete mlogicconout;, which was allocated in initialize() but never 
+  released.
+• Added delete mouttosip;, which was allocated in initialize() but never 
+  released.
+• Added delete minfromsip;, which was allocated in initialize() but never 
+  released.
+• Added delete squelchdet;, which was missing from the destructor entirely.
+• Added delete sipselector;, which was likewise missing from the destructor.
+
+Regex handles
+• Added regfree() plus delete and a null assignment before the exit in all
+  four regex error paths, so a regext whose regcomp() failed is never passed to
+  regfree().
+• Made cleanup() skip regex handles that are null, so a released handle is not
+  touched a second time.
+
+Call lifecycle
+• Added delete call; to both exit paths in onIncomingCall (invalid caller, 
+  rejected call), where a sip::Call was created but neither registered nor freed.
+• Added delete call; to the catch block in makeCall, where a call object was 
+  left behind when makeCall() threw.
+• Added a found flag to unregisterCall() so the object is deleted only when the 
+  pointer was actually present in calls.
+
+pjsua / media handling
+• Converted AudioMedia from the deprecated registerMediaPort() to 
+  registerMediaPort2() with an application-owned pjcachingpool, so the pool 
+  lifetime is under our control.
+• Added an idempotent unregisterPort() method to AudioMedia and call it from the
+  destructor, from unregisterCall() and as a safety net in cleanup().
+• Added stopTransmit() in both directions before tearing down media, so no 
+  transfer chain survives the call it belonged to.
+• Added ep.libDestroy() at the end of cleanup(), guarded by a new epinitialized 
+  flag, so pjsua is shut down explicitly before the Endpoint member is destroyed
+  implicitly.
+• Derived sip::Endpoint from pj::Endpoint and overrode onAudioMediaOpCompleted() 
+  to be notified when asynchronous audio media operations finish.
+
+Smaller correctness fixes
+• Changed the msiploglevel range check to > 6 only, since the < 0 comparison 
+  could never be true for a uint16t.
+• Replaced the variable-length array char msg[msgsize] in the four regex blocks 
+  with std::vector<char> for portable C++.
+• Removed the assert(errsize == msgsize) checks along with the now-unused 
+  errsize declaration and its cast.
+• Commented out the setAudioCodec declaration in SipLogic.h, which had no 
+  definition and would have caused a linker error if called.
+
+Outcome and open items
+• The startup assertion grplockdecref: Assertion 'cnt > 0' failed persisted 
+  through all of the above and was traced to pjproject itself; it no longer 
+  occurs after updating to the current pjproject version from GitHub.
+• Still open: onRegState() starts a new dns.lookup() on every registration state
+  change, which can overlap the in-flight lookup and was the trigger for the 
+  earlier std::futureerror.
+
+### pjproject
+- Fixed the `grp_lock_dec_ref: Assertion 'cnt > 0' failed` abort on shutdown, 
+  which originated in pjproject's transaction layer rather than in this logic; 
+  resolved by updating pjproject to the current version from GitHub.
+- The startup assertion `grp_lock_dec_ref: Assertion 'cnt > 0' failed` traced to
+  pjproject itself rather than to this logic: the transport's group lock was 
+  decremented one time too many during teardown, surfacing in `tsx_shutdown()` 
+  via `mod_tsx_layer_stop()`. Updating to the current pjproject version from 
+  GitHub resolves it; no change to this logic was required.
+

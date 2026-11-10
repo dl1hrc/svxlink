@@ -1,6 +1,9 @@
  1.11.0 -- ?? ??? ????
 -----------------------
 
+* SipLogic: fix resource leaks, harden teardown, migrate media port API
+  Take a look into Changelog in svxlink/svxlink/contrib/SipLogic
+
 * SvxReflector: New HTTP admin API, enabled using the HTTP_ADMIN_SRV_PORT
   configuration variable, for managing the CA. It is used by web based
   administration interfaces, like SvxMonitor, to list, review, sign and remove
